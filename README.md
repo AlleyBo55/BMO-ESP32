@@ -47,7 +47,7 @@ This is what happens when you stop making things to *do* things, and start makin
 
 ## ✨ What it is
 
-A complete, hackable BMO — face animation, voice, touch reactions, pre-baked sound clips — built from parts that fit in your palm and total well under **Rp 200,000** (about $12).
+A complete, hackable BMO — face animation, voice, touch reactions, pre-baked sound clips — built from a small handful of parts that fit in your palm.
 
 - **25 moods.** Idle, blink, happy, laugh, wink, love, talk, listen, focused, surprise, excited, scared, hungry, hot, cold, sick, dizzy, glitch, confused, bored, sad, angry, cool, wake, sleepy. Each one is a real animation, not a static pose.
 - **Touch reactions you can feel.** Quick poke makes BMO gasp and dart its eyes. Hold it and it blushes and purrs. Hold it longer and its eyes turn into hearts. Tickle it (three rapid taps) and it loses its mind laughing.
@@ -60,15 +60,13 @@ A complete, hackable BMO — face animation, voice, touch reactions, pre-baked s
 ## 🎨 The cast
 
 ```
-ESP32-C3 Super Mini   ~Rp  60,000   the brain
-ST7735 1.8" TFT       ~Rp  30,000   the face
-MAX98357A I2S amp     ~Rp  35,000   the voice box
-8Ω 1W speaker         ~Rp  15,000   the actual voice
-INMP441 I2S mic       ~Rp  35,000   the ears (ready for AI conversation)
-TTP223 touch sensor   ~Rp  10,000   the soul
-breadboard + wires    ~Rp  20,000
-─────────────────────────────────
-total                 ~Rp 205,000   (≈ $12 USD)
+ESP32-C3 Super Mini       the brain
+ST7735 1.8" TFT           the face
+MAX98357A I2S amp         the voice box
+8Ω 1W speaker             the actual voice
+INMP441 I2S mic           the ears (ready for AI conversation)
+TTP223 touch sensor       the soul
+breadboard + jumper wires the stage
 ```
 
 That's it. No PCB. No surface mount. No dark magic. Anyone with a soldering iron and patience can build BMO this weekend.
