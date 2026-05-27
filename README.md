@@ -4,7 +4,7 @@
 
 ### A tiny living friend, built from a pocket of parts.
 
-<img src="src/bmo.png" alt="BMO — animated face on a 1.8\" ST7735 TFT, running on an ESP32-C3 Super Mini" width="640" />
+![BMO — animated face on a 1.8 inch ST7735 TFT, running on an ESP32-C3 Super Mini](src/bmo.png)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-5DCBC2?style=for-the-badge)](LICENSE)
 [![ESP32-C3](https://img.shields.io/badge/ESP32--C3-Super%20Mini-1A2D63?style=for-the-badge)](https://www.espressif.com/en/products/socs/esp32-c3)
