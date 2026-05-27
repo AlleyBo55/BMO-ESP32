@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>BMO build notes</title>
+<style>
+  :root {
+    --bg: #0e1411;
+    --panel: #5dcbc2;
+    --panel-dim: #4ba89f;
+    --ink: #0e1411;
+    --fg: #e6f0ea;
+    --muted: #8aa49b;
+    --accent: #ffe066;
+    --link: #88e1d6;
+    --code-bg: #182b27;
+    --code-border: #244a44;
+    --warn: #ffb37a;
+    --good: #7ae582;
+    --bad: #ff8a8a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: ui-sans-serif, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.55;
+  }
+  a { color: var(--link); }
+  header {
+    background: linear-gradient(180deg, var(--panel) 0%, var(--panel-dim) 100%);
+    color: var(--ink);
+    padding: 32px 24px 28px;
+    border-bottom: 4px solid var(--ink);
+  }
+  header h1 { margin: 0 0 6px; font-size: 32px; letter-spacing: 0.5px; }
+  header p { margin: 0; color: rgba(14,20,17,0.78); font-size: 14px; }
+  nav {
+    background: #131c19;
+    border-bottom: 1px solid #1f3934;
+    padding: 8px 24px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  nav a {
+    display: inline-block;
+    margin-right: 16px;
+    font-size: 12px;
+    text-decoration: none;
+    color: var(--muted);
+    padding: 4px 0;
+  }
+  nav a:hover { color: var(--panel); }
+  main { max-width: 940px; margin: 0 auto; padding: 24px; }
+  section { margin-bottom: 56px; scroll-margin-top: 60px; }
+  h2 {
+    border-bottom: 1px solid #1f3934;
+    padding-bottom: 8px;
+    color: var(--panel);
+    font-size: 24px;
+    margin-top: 0;
+  }
+  h3 { color: var(--panel); font-size: 18px; margin-bottom: 8px; margin-top: 24px; }
+  h4 { color: var(--accent); font-size: 14px; margin: 16px 0 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    background: #131c19;
+    border-radius: 6px;
+    overflow: hidden;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid #1c302b;
+    vertical-align: top;
+  }
+  th {
+    background: #182b27;
+    font-weight: 600;
+    color: var(--panel);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  tr:last-child td { border-bottom: none; }
+  td.pin { color: var(--accent); font-family: ui-monospace, Menlo, monospace; white-space: nowrap; }
+  code, pre, .pin { font-family: ui-monospace, Menlo, "Courier New", monospace; }
+  code {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    padding: 12px 14px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .note { background: #1a2722; border-left: 4px solid var(--accent); padding: 12px 16px; border-radius: 4px; margin: 12px 0; font-size: 14px; }
+  .warn { background: #2a1f17; border-left: 4px solid var(--warn); padding: 12px 16px; border-radius: 4px; margin: 12px 0; font-size: 14px; }
+  .good { color: var(--good); }
+  .bad  { color: var(--bad); }
+  .accent { color: var(--accent); }
+  details { background: #131c19; border-radius: 6px; padding: 8px 14px; margin: 6px 0; }
+  details summary { cursor: pointer; font-weight: 600; color: var(--panel); padding: 6px 0; font-size: 14px; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 4px 0; font-size: 14px; }
+  .timeline { border-left: 2px solid #1f3934; padding-left: 16px; }
+  .timeline > div { margin: 12px 0; position: relative; font-size: 14px; }
+  .timeline > div::before {
+    content: ""; width: 10px; height: 10px; border-radius: 50%;
+    background: var(--accent); position: absolute; left: -22px; top: 6px;
+  }
+  .swatch { display: inline-block; width: 16px; height: 16px; vertical-align: middle; border-radius: 3px; border: 1px solid #2a3935; margin-right: 4px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+  .pillbox { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; background: #1c302b; color: var(--muted); margin-right: 4px; }
+  .pillbox.new { background: #1c3c2c; color: var(--good); }
+  ascii-art { display: block; font-family: ui-monospace, Menlo, monospace; white-space: pre; font-size: 12px; color: var(--muted); background: var(--code-bg); border: 1px solid var(--code-border); padding: 12px; border-radius: 6px; line-height: 1.4; overflow-x: auto; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>BMO build notes</h1>
+    <p>1.8" ST7735 TFT face on ESP32-C3 Super Mini, with I2S audio, touch reactions, and pre-baked voice clips.</p>
+  </header>
+
+  <nav>
+    <a href="#wiring">Wiring</a>
+    <a href="#troubleshooting">Troubleshoot</a>
+    <a href="#animation">Animation</a>
+    <a href="#audio">Audio</a>
+    <a href="#touch">Touch</a>
+    <a href="#voice">Voice clips</a>
+    <a href="#extending">Extending</a>
+    <a href="#references">References</a>
+  </nav>
+
+  <main>
+
+    <!-- ============================================================ -->
+    <section id="wiring">
+      <h2>Full wiring</h2>
+
+      <p>Everything plugs into one ESP32-C3 Super Mini. Power rails (3V3, 5V, GND) are shared via breadboard rails. Signal pins are dedicated.</p>
+
+      <h3>Pin map</h3>
+      <table>
+        <thead><tr><th>ESP32-C3 pin</th><th>Connects to</th><th>Function</th></tr></thead>
+        <tbody>
+          <tr><td class="pin">3V3</td>  <td>TFT VCC, TFT LED, INMP441 VDD, TTP223 VCC</td><td>3.3V power rail</td></tr>
+          <tr><td class="pin">5V</td>   <td>MAX98357A VIN</td><td>5V power for the audio amp (cleaner audio)</td></tr>
+          <tr><td class="pin">GND</td>  <td>All component grounds (one shared rail)</td><td>Common ground</td></tr>
+          <tr><td class="pin">GP0</td>  <td>MAX98357A BCLK + INMP441 SCK</td><td>I2S bit clock (shared between mic and amp)</td></tr>
+          <tr><td class="pin">GP1</td>  <td>MAX98357A LRC + INMP441 WS</td><td>I2S word select (shared)</td></tr>
+          <tr><td class="pin">GP2</td>  <td>MAX98357A DIN</td><td>I2S audio data <em>out</em> (to amp)</td></tr>
+          <tr><td class="pin">GP3</td>  <td>TFT A0 (DC)</td><td>SPI data/command</td></tr>
+          <tr><td class="pin">GP4</td>  <td>TFT SCK</td><td>SPI clock</td></tr>
+          <tr><td class="pin">GP5</td>  <td>INMP441 SD</td><td>I2S audio data <em>in</em> (from mic)</td></tr>
+          <tr><td class="pin">GP6</td>  <td>TFT SD/MOSI</td><td>SPI data</td></tr>
+          <tr><td class="pin">GP7</td>  <td>TFT CS</td><td>SPI chip select</td></tr>
+          <tr><td class="pin">GP8</td>  <td>(onboard LED)</td><td>Reserved — leave free</td></tr>
+          <tr><td class="pin">GP9</td>  <td>(BOOT pin)</td><td>Reserved — leave free</td></tr>
+          <tr><td class="pin">GP10</td> <td>TFT RESET</td><td>Hardware reset for the TFT controller</td></tr>
+          <tr><td class="pin">GP20</td> <td>TTP223 I/O</td><td>Touch sensor digital input</td></tr>
+          <tr><td class="pin">GP21</td> <td>(spare)</td><td>Free for future expansion</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Per-component wiring</h3>
+
+      <h4>1.8" ST7735 TFT (8-pin)</h4>
+      <table>
+        <tr><th>TFT label</th><th>Goes to</th><th>Note</th></tr>
+        <tr><td class="pin">VCC</td>   <td class="pin">3V3</td><td>White-PCB modules with onboard regulator also accept 5V</td></tr>
+        <tr><td class="pin">GND</td>   <td class="pin">GND</td></tr>
+        <tr><td class="pin">LED</td>   <td class="pin">3V3</td><td>Backlight, hardwired on (no software dimming)</td></tr>
+        <tr><td class="pin">CS</td>    <td class="pin">GP7</td></tr>
+        <tr><td class="pin">RESET</td> <td class="pin">GP10</td></tr>
+        <tr><td class="pin">A0</td>    <td class="pin">GP3</td><td>Also called DC on some modules</td></tr>
+        <tr><td class="pin">SD</td>    <td class="pin">GP6</td><td>Also called SDA / MOSI / SDI</td></tr>
+        <tr><td class="pin">SCK</td>   <td class="pin">GP4</td><td>Also called SCL / SCLK</td></tr>
+      </table>
+
+      <h4>MAX98357A I2S amplifier</h4>
+      <table>
+        <tr><th>Amp pin</th><th>Goes to</th><th>Note</th></tr>
+        <tr><td class="pin">VIN</td>  <td class="pin">5V</td><td><strong>Not 3V3.</strong> Audio is louder + cleaner from 5V.</td></tr>
+        <tr><td class="pin">GND</td>  <td class="pin">GND</td></tr>
+        <tr><td class="pin">BCLK</td> <td class="pin">GP0</td><td>Shared clock with mic</td></tr>
+        <tr><td class="pin">LRC</td>  <td class="pin">GP1</td><td>Shared word select with mic</td></tr>
+        <tr><td class="pin">DIN</td>  <td class="pin">GP2</td><td>Audio data in (from MCU)</td></tr>
+        <tr><td class="pin">GAIN</td> <td>floating</td><td>Default 9 dB. Tie to GND for 12 dB, VIN for 6 dB.</td></tr>
+        <tr><td class="pin">SD</td>   <td>floating</td><td>Shutdown control. Floating = always on.</td></tr>
+        <tr><td>+ / − pads</td>       <td>Speaker</td><td>8 Ω 1–2 W speaker, polarity doesn't matter for mono</td></tr>
+      </table>
+
+      <h4>INMP441 I2S microphone</h4>
+      <table>
+        <tr><th>Mic pin</th><th>Goes to</th><th>Note</th></tr>
+        <tr><td class="pin">VDD</td>  <td class="pin">3V3</td><td><strong>3V3 only.</strong> 5V will damage it.</td></tr>
+        <tr><td class="pin">GND</td>  <td class="pin">GND</td></tr>
+        <tr><td class="pin">L/R</td>  <td class="pin">GND</td><td><strong>Mandatory.</strong> Selects left channel for mono. Floating = garbage.</td></tr>
+        <tr><td class="pin">WS</td>   <td class="pin">GP1</td><td>Shared with amp</td></tr>
+        <tr><td class="pin">SCK</td>  <td class="pin">GP0</td><td>Shared with amp</td></tr>
+        <tr><td class="pin">SD</td>   <td class="pin">GP5</td><td>Audio data out (to MCU)</td></tr>
+      </table>
+
+      <h4>TTP223 capacitive touch sensor</h4>
+      <table>
+        <tr><th>Sensor pin</th><th>Goes to</th><th>Note</th></tr>
+        <tr><td class="pin">VCC</td>  <td class="pin">3V3</td></tr>
+        <tr><td class="pin">GND</td>  <td class="pin">GND</td></tr>
+        <tr><td class="pin">I/O</td>  <td class="pin">GP20</td><td>Active HIGH momentary mode (default factory setting). Also called SIG or OUT.</td></tr>
+      </table>
+      <div class="note">
+        Some TTP223 breakouts have <strong>jumper pads A/B</strong> on the back. Leave both open for momentary HIGH-on-touch mode (what we use).
+      </div>
+
+      <h3>Power rails</h3>
+      <ascii-art>USB → C3's "5V" pin ──┬── MAX98357A VIN     (amp loves 5V)
+                       └── (5V rail for any other 5V devices)
+
+C3's "3V3" pin ───────┬── TFT VCC + LED
+                       ├── INMP441 VDD
+                       └── TTP223 VCC
+
+C3's "GND" pin ───────┬── ALL component GNDs share this rail
+                       └── (one rail = common ground = mandatory)</ascii-art>
+
+      <h3>I2S sharing — why mic and amp share clock pins</h3>
+      <p>The C3's I2S peripheral is half-duplex: it can record OR play, not both at once. The clock signals (BCLK and LRC) are identical for input and output, so we wire both the mic and amp to the same GP0/GP1. Only the data pins are separate (GP2 for amp out, GP5 for mic in). Software switches between record and play modes.</p>
+
+      <h3>Power budget</h3>
+      <table>
+        <thead><tr><th>Component</th><th>Typical</th><th>Peak</th></tr></thead>
+        <tbody>
+          <tr><td>ESP32-C3 (Wi-Fi active)</td><td>80 mA</td><td>320 mA</td></tr>
+          <tr><td>TFT + backlight</td>       <td>50 mA</td><td>80 mA</td></tr>
+          <tr><td>INMP441 mic</td>           <td>1.4 mA</td><td>2 mA</td></tr>
+          <tr><td>MAX98357A (idle)</td>      <td>5 mA</td><td>~300 mA loud peak</td></tr>
+          <tr><td>TTP223 touch</td>          <td>0.5 mA</td><td>2 mA</td></tr>
+        </tbody>
+      </table>
+      <div class="warn">
+        Peak draw ~700 mA exceeds USB 2.0 (500 mA). Power BMO from a 1 A wall adapter or power bank, not a laptop port. Add a 100 µF cap between 5V and GND near the MAX98357A for cleaner audio peaks.
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="troubleshooting">
+      <h2>Troubleshooting</h2>
+
+      <h3>Screen shows white / black / nothing</h3>
+
+      <ol>
+        <li><strong>Run the serial monitor</strong> first to confirm firmware is running:
+          <pre><code>pio device monitor -p /dev/cu.usbmodem134301 -b 115200</code></pre>
+          You should see <code>mood: idle</code>, <code>mood: blink</code>, etc. scrolling.
+        </li>
+        <li><strong>Power-only test:</strong> disconnect every signal wire (CS, RESET, A0, SD, SCK), leave only VCC, GND, LED. Result should be <span class="good">backlight on, screen white</span>. If not, your power wiring is the problem.</li>
+        <li><strong>Add signals one at a time:</strong> RESET → CS → A0 → SD → SCK. Until SCK is connected, screen should remain white. The moment SCK is wired, the chip starts initializing. If still white after all 5 are connected, one wire is faulty.</li>
+        <li><strong>Backlight glow with only GND wired</strong> = phantom power leakage. Some signal pin is back-feeding through a protection diode. Disconnect everything, fix VCC, retry.</li>
+      </ol>
+
+      <h3>Wrong size / shifted image</h3>
+      <table>
+        <tr><th>Symptom</th><th>Fix</th></tr>
+        <tr><td>Only ¼ of screen fills, rest is TV noise</td><td>Address window too big. Set <code>TFT_W=160</code>, <code>TFT_H=128</code>.</td></tr>
+        <tr><td>Image shifted by 2–26 pixels</td><td>Adjust <code>X_OFFSET</code> / <code>Y_OFFSET</code>.</td></tr>
+        <tr><td>Colors swapped (red shows as blue)</td><td>Toggle BGR/RGB bit in MADCTL byte (bit 3).</td></tr>
+        <tr><td>Image upside-down or rotated</td><td>Try MADCTL <code>0x60</code>, <code>0x40</code>, <code>0xA0</code>, or <code>0xC0</code>.</td></tr>
+      </table>
+
+      <h3>"My library doesn't work" — known C3 issue</h3>
+      <p>Both <code>Adafruit_ST7735</code> and <code>TFT_eSPI</code> can silently re-bind SPI bus pins to their defaults on the ESP32-C3, ignoring custom build flags. If you've configured pins correctly and still get a white screen, switch to raw <code>SPIClass(FSPI)</code> with explicit pin assignments and a hand-rolled init.</p>
+      <p>This BMO firmware does exactly that — see <code>tftInit()</code> in <code>main.cpp</code>.</p>
+
+      <details>
+        <summary>The full history of what we tried before this worked</summary>
+        <ul>
+          <li><code>Adafruit_ST7735</code> 5-arg software SPI constructor → screen stayed white</li>
+          <li><code>Adafruit_ST7735</code> hardware SPI on FSPI → still white. Library re-bound bus pins.</li>
+          <li><code>TFT_eSPI</code> with <code>USER_SETUP_LOADED</code> + explicit defines → still white</li>
+          <li>5 different ST7735 tab variants: <code>GREENTAB</code>, <code>BLACKTAB</code>, <code>REDTAB</code>, <code>18GREENTAB</code>, <code>MINI160x80</code> → all white</li>
+          <li>Raw bit-banged ST7735 init on our exact pins → first color! But only ¼ of screen because address window was 240×320</li>
+          <li>Switched to hardware <code>SPIClass(FSPI)</code> with our pin map and a manual init → works at 40 MHz</li>
+        </ul>
+      </details>
+
+      <h3>Audio issues</h3>
+      <table>
+        <tr><th>Symptom</th><th>Likely cause</th></tr>
+        <tr><td>No sound at all</td><td>MAX98357A power on 3V3 instead of 5V; DIN not on GP2; speaker leads not connected</td></tr>
+        <tr><td>Crackling / popping</td><td>USB undersized — switch to a 1 A adapter; add 100 µF cap on amp's 5V/GND</td></tr>
+        <tr><td>Very quiet</td><td>GAIN pin tied to wrong rail; <code>g_volume</code> too low (default 0.234)</td></tr>
+        <tr><td>Distorted at peaks</td><td>Volume too high; reduce <code>g_volume</code> or untie GAIN</td></tr>
+      </table>
+
+      <h3>Touch sensor issues</h3>
+      <table>
+        <tr><th>Symptom</th><th>Likely cause</th></tr>
+        <tr><td>Always triggered</td><td>I/O pin floating; check wire to GP20</td></tr>
+        <tr><td>Triggers spontaneously</td><td>Capacitive coupling to nearby wires; move sensor away from MCU</td></tr>
+        <tr><td>Toggles instead of momentary</td><td>Jumper A on back is bridged. Open it.</td></tr>
+        <tr><td>Active LOW (HIGH when not touched)</td><td>Jumper B is bridged. Open it.</td></tr>
+      </table>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="animation">
+      <h2>How the animation works</h2>
+
+      <h3>Double-buffered framebuffer</h3>
+      <p>Drawing primitives (<code>fbFillRect</code>, <code>fbFillCircle</code>, etc) go into a <strong>40 KB RGB565 buffer in RAM</strong>. The buffer is flushed to the panel in one big SPI burst per frame, so the panel never shows a half-drawn frame.</p>
+      <pre><code>static uint16_t fb[TFT_W * TFT_H];   // 40 KB
+
+void renderFrame(...) {
+  fbFill(C_BG);
+  fbDrawEye(...);
+  fbDrawSmile(...);
+  flushFrame();   // single SPI burst, ~5 ms at 40 MHz
+}</code></pre>
+
+      <h3>Time-driven moods</h3>
+      <p>Each mood is a function from <em>time</em> → <em>face state</em>, not a still pose. The face state struct gets re-evaluated every ~30 ms (≈30 fps), producing real motion like blinking, pupil sway, mouth pulses, and shake.</p>
+
+      <pre><code>case MOOD_TALK: {
+  s.mouth = FaceState::M_TALK;
+  s.mouthOpen = 0.5f + 0.5f * sinf(now * 0.025f);  // mouth oscillates
+  s.pupilDy = (int)(1 * sinf(now * 0.01f));        // gentle pupil bob
+  break;
+}</code></pre>
+
+      <h3>The 25 moods</h3>
+      <p>Auto-cycle script in <code>loop()</code> rotates through these (interrupted by touch):</p>
+      <div class="grid2">
+        <div>
+          <h4>Default emotional set</h4>
+          <ul>
+            <li><strong>idle</strong> — slow pupil sway, occasional natural blink</li>
+            <li><strong>blink</strong> — deliberate close + open</li>
+            <li><strong>happy</strong> — crescent eyes, pulsing mouth, blush</li>
+            <li><strong>laugh</strong> — wide mouth, bouncing body, "haha" emphasis</li>
+            <li><strong>wink</strong> — one eye closed, big grin</li>
+            <li><strong>love</strong> — heart pupils, floating hearts</li>
+            <li><strong>talk</strong> — mouth oscillates, pupil bob</li>
+            <li><strong>listen</strong> — flat mouth, slow drift</li>
+            <li><strong>focused</strong> — squint eyes, sweat drop, brows down</li>
+            <li><strong>surprise</strong> — small "oh", jittery pupils</li>
+            <li><strong>excited</strong> — sparkling stars, bouncing</li>
+            <li><strong>scared</strong> — wide eyes, frown, sweat, shake</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Status & state moods</h4>
+          <ul>
+            <li><strong>hungry</strong> — drooling, eyes look down</li>
+            <li><strong>hot</strong> — steam lines, sweat, panting</li>
+            <li><strong>cold</strong> — snowflakes, chattering teeth</li>
+            <li><strong>sick</strong> — zigzag mouth, droopy brows, wobble</li>
+            <li><strong>dizzy</strong> — spinning spirals, wobbly mouth</li>
+            <li><strong>glitch</strong> — flicker bars, X-eyes flash</li>
+            <li><strong>confused</strong> — dot eyes, ?? floating</li>
+            <li><strong>bored</strong> — half-lidded eyes, occasional "z"</li>
+            <li><strong>sad</strong> — drooping brows, frown, tear drips</li>
+            <li><strong>angry</strong> — angry brows, head shake</li>
+            <li><strong>cool</strong> — sunglasses, smug smile</li>
+            <li><strong>wake</strong> — huge yawn, eyes pop wide</li>
+            <li><strong>sleepy</strong> — heavy breathing eyelids</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>Color palette</h3>
+      <ul>
+        <li><span class="swatch" style="background:#1A2D63"></span><code>C_BG = 0x1AD3</code> — dark BMO teal-blue (consistent across all moods)</li>
+        <li><span class="swatch" style="background:#000"></span><code>C_INK = 0x0000</code> — black for face features</li>
+        <li><span class="swatch" style="background:#fff"></span><code>C_SHINE = 0xFFFF</code> — white pupil shine</li>
+        <li><span class="swatch" style="background:#fcd3a1"></span><code>C_BLUSH = 0xFCD3</code> — pink cheeks</li>
+        <li><span class="swatch" style="background:#ff00ff"></span><code>C_HEART = 0xF81F</code> — heart-eye color</li>
+        <li><span class="swatch" style="background:#ffff00"></span><code>C_STAR = 0xFFE0</code> — sparkle yellow</li>
+      </ul>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="audio">
+      <h2>Audio system <span class="pillbox new">new</span></h2>
+
+      <h3>I2S output pipeline</h3>
+      <p>The C3's I2S peripheral streams 16 kHz mono int16 PCM samples to the MAX98357A. The amp converts I2S to a class-D analog signal that drives the speaker.</p>
+      <pre><code>void audioInit() {
+  i2s_config_t cfg = {
+    .mode = I2S_MODE_MASTER | I2S_MODE_TX,
+    .sample_rate = 16000,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+    ...
+  };
+  i2s_pin_config_t pins = {
+    .bck_io_num = PIN_I2S_BCLK,   // GP0
+    .ws_io_num = PIN_I2S_LRC,     // GP1
+    .data_out_num = PIN_I2S_DOUT, // GP2
+  };
+  i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL);
+  i2s_set_pin(I2S_NUM_0, &pins);
+}</code></pre>
+
+      <h3>Volume control</h3>
+      <p>A global <code>g_volume</code> float (0.0..1.0) scales every sample as it's written to I2S. Default is 0.234. To change at runtime:</p>
+      <pre><code>setVolume(0.5f);   // 50% volume
+float v = getVolume();</code></pre>
+      <p>The variable is <code>volatile</code> and clamped, safe to update from any task or interrupt. A future web UI just calls <code>setVolume(slider/100.0f)</code>.</p>
+
+      <h3>Sound generation methods</h3>
+      <table>
+        <thead><tr><th>Method</th><th>What it does</th><th>When used</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>playTone(hz, ms)</code></td>
+            <td>Pure sine tone at a fixed frequency</td>
+            <td>Simple test beeps</td>
+          </tr>
+          <tr>
+            <td><code>playSlide(start, end, ms)</code></td>
+            <td>Pitch-bent sine with light vibrato + smooth ease curve</td>
+            <td>Synthesized BMO-style speech</td>
+          </tr>
+          <tr>
+            <td><code>playChirp(base, peak, ms)</code></td>
+            <td>Rises then falls in one motion</td>
+            <td>Laugh syllables</td>
+          </tr>
+          <tr>
+            <td><code>playClip(&clip)</code></td>
+            <td>Streams a pre-baked PCM clip from flash</td>
+            <td>Real recorded BMO voice (when WAV file is provided)</td>
+          </tr>
+          <tr>
+            <td><code>playClipOrSynth(name, fallback)</code></td>
+            <td>Tries to find clip by name, falls back to synth function</td>
+            <td>Gracefully handles missing audio files</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Synthesized BMO voices</h3>
+      <p>A library of small "voice" functions in <code>main.cpp</code> mimic BMO's vocal character with intonation curves on sine tones:</p>
+      <ul>
+        <li><code>playBmoHi()</code> — 3-syllable rising warble that <em>feels</em> like "hi friend!"</li>
+        <li><code>playBmoWhat()</code> — single rising chirp with question intonation</li>
+        <li><code>playBmoChant()</code> — 4 quick beeps with a tiny bounce ("BMO BMO BMO BMO")</li>
+        <li><code>playBmoHooray()</code> — rising 4-note triumph C → E → G → B → high-E sparkle</li>
+        <li><code>playBmoLaugh()</code> — 5 alternating chirps that descend in pitch</li>
+        <li><code>playBmoStartled()</code> — sharp "huh!" double-chirp</li>
+        <li><code>playBmoBeepBoop()</code> — classic two-tone</li>
+        <li><code>playBmoSigh()</code> — content descending warble</li>
+        <li><code>playBmoGames()</code> — 9-note playful melody</li>
+      </ul>
+      <div class="note">
+        These synth voices are stand-ins until real WAV clips are baked in via <a href="#voice">the voice clips system</a>. The firmware automatically uses real clips when available and falls back to synth when missing.
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="touch">
+      <h2>Touch reactions <span class="pillbox new">new</span></h2>
+
+      <h3>Touch classifier</h3>
+      <p>The TTP223 sensor outputs HIGH while touched, LOW when released. The firmware polls this on every frame (~30 Hz) and classifies each touch by hold duration and recent press count:</p>
+      <table>
+        <thead><tr><th>Gesture</th><th>Detection</th><th>Reaction</th></tr></thead>
+        <tbody>
+          <tr><td><code>QUICK_POKE</code></td><td>Hold &lt; 250 ms (single tap)</td><td>Startled "what?!"</td></tr>
+          <tr><td><code>HOLD</code></td><td>250–1500 ms hold</td><td>Petted, content "hi friend!"</td></tr>
+          <tr><td><code>LONG_HOLD</code></td><td>&gt; 1500 ms hold</td><td>Deep affection → heart eyes</td></tr>
+          <tr><td><code>TICKLE</code></td><td>3+ rapid taps within 900 ms window</td><td>Helpless laughter</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Multi-phase reactions</h3>
+      <p>Each gesture triggers a <em>sequence</em> of timed phases that tell a small story, applying classic animation principles:</p>
+      <ul>
+        <li><strong>Anticipation</strong> — a tiny pre-motion before the main reaction (squash before recoil)</li>
+        <li><strong>Squash &amp; stretch</strong> — body deforms slightly under motion</li>
+        <li><strong>Follow-through</strong> — body keeps wobbling slightly after eyes settle</li>
+        <li><strong>Secondary motion</strong> — cheeks, blush, eyelids react with offset timing</li>
+        <li><strong>Eye tracking</strong> — pupils dart toward the touch direction, then track to the user</li>
+        <li><strong>Particles</strong> — exclamation marks, hearts, stars, blush dots burst out as confetti</li>
+      </ul>
+
+      <h4>Quick poke reaction breakdown</h4>
+      <ol>
+        <li><strong>Squash 80 ms</strong> — body compresses down, mouth flattens (anticipation)</li>
+        <li><strong>Recoil 220 ms</strong> — launches upward with eased motion, gasp tone, exclamation marks burst out</li>
+        <li><strong>Dart 600 ms</strong> — pupils snap left → right → center looking for the culprit, body wobbles</li>
+        <li><strong>Recover 700 ms</strong> — double-blink, soft smile, blush blooms, gentle breathing</li>
+      </ol>
+
+      <h4>Hold reaction breakdown</h4>
+      <ol>
+        <li><strong>Glance 220 ms</strong> — pupils track toward touch, eyes start to squint happy, content sigh tone</li>
+        <li><strong>Relax 800 ms</strong> — pupils return forward, eyes close to crescents, mouth opens gently, "hi friend!" plays</li>
+        <li><strong>Purr 1500 ms</strong> — full breathing animation, pink dot puffs trickle up off the cheeks</li>
+      </ol>
+
+      <h4>Long hold reaction breakdown</h4>
+      <ol>
+        <li><strong>Pet 1000 ms</strong> — same warm-up as hold, "BMO BMO BMO BMO" chant plays</li>
+        <li><strong>Swell 700 ms</strong> — eyes start opening wider, body slowly rises, "Hooray!" rising scale</li>
+        <li><strong>Sting 250 ms</strong> — sparkle high note + circle of hearts erupts outward, "Who wants to play video games?" melody</li>
+        <li><strong>Heart eyes 1700 ms</strong> — eyes are hearts, ambient hearts continuously float, body bobs softly</li>
+      </ol>
+
+      <h4>Tickle reaction breakdown</h4>
+      <ol>
+        <li><strong>Burst 350 ms</strong> — sharp "ha!" with star confetti exploding from mouth</li>
+        <li><strong>Sustained 1900 ms</strong> — bouncing laughter, stars sprinkle on each peak, "haha" beeps trigger when wave crests</li>
+        <li><strong>Exhausted slump 300 ms</strong> — body sags, mouth closes to a tired smile</li>
+      </ol>
+
+      <h3>Particle system</h3>
+      <p>Up to 12 simultaneous particles fly outward with simple physics. Each has position, velocity, lifetime, color, and shape kind:</p>
+      <pre><code>particlesEmit(6, MOUTH_CX, MOUTH_Y, /* kind */ 1, C_HEART);
+// kind 0 = star, 1 = heart, 2 = exclamation, 3 = soft dot</code></pre>
+      <p>Particles step each frame: position += velocity, velocity.y += gravity, life -= dt. They fade out and shrink as life approaches 0. Used in all four touch reactions.</p>
+
+      <h3>Chained reactions</h3>
+      <p>The reaction loop polls touch on every frame, so if you start a new gesture mid-reaction (e.g. tickle while a hold is purring), BMO breaks out and starts the new reaction immediately. This makes BMO feel responsive instead of "deaf" during animations.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="voice">
+      <h2>Voice clips <span class="pillbox new">new</span></h2>
+
+      <h3>How it works</h3>
+      <p>You drop WAV/MP3 files into <code>firmware/bmo_face_anim/audio/</code>, run a Python script that converts them to 16 kHz 8-bit PCM and writes <code>src/audio_clips.h</code>, then reflash. The firmware uses real audio when available and falls back to synth for missing clips.</p>
+
+      <h3>File naming</h3>
+      <p>The filename (minus extension) determines what gesture plays the clip:</p>
+      <table>
+        <thead><tr><th>Filename</th><th>Plays for</th><th>Suggested content</th></tr></thead>
+        <tbody>
+          <tr><td><code>bmo_hi_friend.wav</code></td><td>HOLD reaction</td><td>"Hi friend!"</td></tr>
+          <tr><td><code>bmo_what.wav</code></td><td>QUICK_POKE</td><td>"What?!" / surprised gasp</td></tr>
+          <tr><td><code>bmo_chant.wav</code></td><td>LONG_HOLD start</td><td>"BMO BMO BMO BMO"</td></tr>
+          <tr><td><code>bmo_hooray.wav</code></td><td>LONG_HOLD middle</td><td>"Hooray!" or "Yay!"</td></tr>
+          <tr><td><code>bmo_games.wav</code></td><td>LONG_HOLD end</td><td>"Who wants to play video games?"</td></tr>
+          <tr><td><code>bmo_laugh.wav</code></td><td>TICKLE</td><td>Giggling / "hee hee hee"</td></tr>
+          <tr><td><code>bmo_sigh.wav</code></td><td>HOLD start</td><td>Content sigh</td></tr>
+        </tbody>
+      </table>
+
+      <h3>One-time setup</h3>
+      <pre><code>pip install pydub
+brew install ffmpeg     # for MP3 support; not needed if all files are WAV</code></pre>
+
+      <h3>Bake workflow</h3>
+      <pre><code>cd firmware/bmo_face_anim
+
+# 1. Drop WAV files into ./audio/
+cp ~/Downloads/bmo_hi_friend.wav audio/
+cp ~/Downloads/bmo_what.wav audio/
+
+# 2. Bake them into a C header
+python3 tools/bake_audio.py
+
+# 3. Reflash
+pio run -t upload</code></pre>
+
+      <h3>Output footprint</h3>
+      <p>Each second of clip ≈ 16 KB of flash. The C3 has ~3 MB free, room for 150–200 short clips. Keep individual clips under 2 seconds (1 s ideal) so they don't block the animation.</p>
+
+      <h3>Quality notes</h3>
+      <ul>
+        <li>The 8-bit 16 kHz format is "GameBoy quality" — clear voice, not hi-fi. Perfect for BMO's chiptune feel.</li>
+        <li>If a clip sounds quiet/dull after baking, your source WAV is probably already too quiet at 8-bit. Use a louder source.</li>
+        <li>Stereo files are auto-converted to mono. Sample rates auto-resample to 16 kHz.</li>
+      </ul>
+
+      <h3>Where to find BMO voice clips</h3>
+      <ul>
+        <li>Search "BMO voice clips wav" on freesound.org or fan archive sites</li>
+        <li>"Adventure Time BMO sound effects pack" on soundboard sites</li>
+        <li>Your own DVD rip if you legally own the show</li>
+      </ul>
+      <div class="warn">
+        Real BMO voice is © Cartoon Network. Personal use is generally OK; redistributing or selling BMO clones with copyrighted audio is not. For commercial projects, generate "BMO-style" speech via OpenAI TTS with pitch-shift + bit-crush instead.
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="extending">
+      <h2>Extending BMO</h2>
+
+      <h3>Add a new mood</h3>
+      <ol>
+        <li>Add an enum entry to <code>Mood</code> in <code>main.cpp</code></li>
+        <li>Add a name in <code>moodName()</code></li>
+        <li>Add a <code>case</code> in <code>playMood()</code> that sets <code>FaceState</code> fields as a function of <code>now</code> or <code>t</code></li>
+        <li>Optionally add a jingle to the <code>jingleFor()</code> dispatcher</li>
+        <li>Add an entry to the <code>script[]</code> array in <code>loop()</code> with a duration</li>
+      </ol>
+
+      <h3>Add a new touch gesture</h3>
+      <ol>
+        <li>Add a <code>TouchKind</code> enum entry</li>
+        <li>Update <code>pollTouch()</code>'s classification logic (e.g. detect double-tap, force-press if you have analog input)</li>
+        <li>Add a new <code>case</code> in <code>playReaction()</code> with phase animations</li>
+        <li>Optionally add a clip name to <code>playClipOrSynth()</code> calls</li>
+      </ol>
+
+      <h3>Add a custom voice clip</h3>
+      <ol>
+        <li>Drop the WAV into <code>audio/your_clip_name.wav</code></li>
+        <li>Run <code>python3 tools/bake_audio.py</code></li>
+        <li>In <code>main.cpp</code>, call it with <code>playClip(findClip("your_clip_name"))</code></li>
+      </ol>
+
+      <h3>Hook into web simulator</h3>
+      <p>The repo includes a Next.js + Tailwind simulator under <code>web/</code> that connects via Web Serial. The firmware can emit JSON-over-USB lines for each rendered mood and accept inbound mood/sensor commands. To enable simulator mode, swap the body of <code>renderFrame()</code> — same face state, different output backend.</p>
+
+      <h3>Add WiFi + cloud STT/LLM/TTS (planned)</h3>
+      <p>The conversation pipeline is sketched out:</p>
+      <ol>
+        <li>INMP441 mic captures audio while touch is held → 3 sec int16 PCM in RAM</li>
+        <li>HTTPS POST to <code>api.openai.com/v1/audio/transcriptions</code> (Whisper)</li>
+        <li>POST transcript to <code>api.anthropic.com/v1/messages</code> (Claude)</li>
+        <li>POST reply to <code>api.openai.com/v1/audio/speech</code> (TTS)</li>
+        <li>Stream resulting audio bytes directly to I2S → speaker</li>
+      </ol>
+      <p>Memory budget on the C3 is tight (~340 KB needed, 320 KB available) — workaround is to record at 8 kHz or stream uploads instead of buffering.</p>
+
+      <h3>Move to a different screen</h3>
+      <p>Update <code>TFT_W</code>, <code>TFT_H</code>, <code>X_OFFSET</code>, <code>Y_OFFSET</code>, and the MADCTL byte. The 40 KB framebuffer scales linearly — 240×240 round display = 115 KB, still fits the C3's RAM.</p>
+
+      <h3>Move to ESP32-S3 with camera</h3>
+      <p>The S3 has 8 MB PSRAM and a DVP camera interface. Port involves changing 5 pin numbers (SPI bus differs), adding camera init, and routing camera frames to the screen via a "look at me" mode. Same face firmware works.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section id="references">
+      <h2>References</h2>
+      <ul>
+        <li><a href="https://www.displayfuture.com/Display/datasheet/controller/ST7735.pdf">ST7735 datasheet</a></li>
+        <li><a href="https://datasheets.maximintegrated.com/en/ds/MAX98357A-MAX98357B.pdf">MAX98357A datasheet</a></li>
+        <li><a href="https://invensense.tdk.com/wp-content/uploads/2015/02/INMP441.pdf">INMP441 datasheet</a></li>
+        <li><a href="https://docs.espressif.com/projects/arduino-esp32/en/latest/api/spi.html">ESP32 Arduino SPI API</a></li>
+        <li><a href="https://docs.espressif.com/projects/esp-idf/en/v4.4/esp32c3/api-reference/peripherals/i2s.html">ESP32-C3 I2S driver (legacy API)</a></li>
+        <li><a href="https://en.wikipedia.org/wiki/RGB565">RGB565 pixel format</a></li>
+        <li><a href="https://github.com/upiir/esp32s3_oled_dasai_mochi">Dasai Mochi reference firmware (animation inspiration)</a></li>
+        <li><a href="https://platform.openai.com/docs/api-reference/audio">OpenAI audio API (Whisper STT, TTS)</a></li>
+        <li><a href="https://docs.anthropic.com/en/api/messages">Anthropic Messages API (Claude)</a></li>
+      </ul>
+
+      <h3>Repo layout</h3>
+<ascii-art>BMO/
+├── documentation.html              ← this file
+├── firmware/
+│   └── bmo_face_anim/
+│       ├── platformio.ini
+│       ├── audio/                  ← drop your WAV/MP3 clips here
+│       ├── tools/
+│       │   └── bake_audio.py       ← convert WAVs into C header
+│       └── src/
+│           ├── main.cpp            ← all the BMO code
+│           └── audio_clips.h       ← auto-generated by bake_audio.py
+└── web/                            ← Next.js + Tailwind simulator (Web Serial)</ascii-art>
+    </section>
+
+  </main>
+</body>
+</html>

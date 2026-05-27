@@ -1,0 +1,37 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Secrets (never commit API keys)
+secrets.h
+secrets.json
+.env
+
+# Audio: keep the bake script + folder, but never commit copyrighted clips
+firmware/bmo_face_anim/audio/*.wav
+firmware/bmo_face_anim/audio/*.mp3
+firmware/bmo_face_anim/audio/*.ogg
+firmware/bmo_face_anim/audio/*.flac
+!firmware/bmo_face_anim/audio/.gitkeep
+
+# Logs
+*.log

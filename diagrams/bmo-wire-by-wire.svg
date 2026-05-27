@@ -1,0 +1,223 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2200" height="2600" viewBox="0 0 2200 2600">
+  <defs>
+    <style>
+      .bg{fill:#fbfcfd}
+      .title{font:800 54px Arial,sans-serif;fill:#0f172a}
+      .sub{font:600 25px Arial,sans-serif;fill:#334155}
+      .panel{fill:#fff;stroke:#cbd5e1;stroke-width:3;rx:24}
+      .module{fill:#f8fafc;stroke:#64748b;stroke-width:3;rx:16}
+      .pad{fill:#fde68a;stroke:#92400e;stroke-width:2;rx:3}
+      .hole{fill:#e5e7eb;stroke:#64748b;stroke-width:4}
+      .x{stroke:#dc2626;stroke-width:6;stroke-linecap:round}
+      .h{font:800 32px Arial,sans-serif;fill:#111827}
+      .label{font:700 22px Arial,sans-serif;fill:#111827}
+      .small{font:600 18px Arial,sans-serif;fill:#334155}
+      .tiny{font:600 15px Arial,sans-serif;fill:#334155}
+      .wire5{stroke:#ef4444;stroke-width:8;fill:none;stroke-linecap:round;stroke-linejoin:round}
+      .wire33{stroke:#f97316;stroke-width:8;fill:none;stroke-linecap:round;stroke-linejoin:round}
+      .wireg{stroke:#111827;stroke-width:8;fill:none;stroke-linecap:round;stroke-linejoin:round}
+      .wireb{stroke:#2563eb;stroke-width:7;fill:none;stroke-linecap:round;stroke-linejoin:round}
+      .wiregr{stroke:#16a34a;stroke-width:7;fill:none;stroke-linecap:round;stroke-linejoin:round}
+      .wirey{stroke:#eab308;stroke-width:7;fill:none;stroke-linecap:round;stroke-linejoin:round}
+      .wirep{stroke:#9333ea;stroke-width:7;fill:none;stroke-linecap:round;stroke-linejoin:round}
+      .wireo{stroke:#fb923c;stroke-width:7;fill:none;stroke-linecap:round;stroke-linejoin:round}
+      .bundle5{fill:#ef4444;stroke:#991b1b;stroke-width:3;rx:22}
+      .bundle33{fill:#f97316;stroke:#9a3412;stroke-width:3;rx:22}
+      .bundleg{fill:#111827;stroke:#020617;stroke-width:3;rx:22}
+      .white{font:800 25px Arial,sans-serif;fill:#fff}
+      .num{font:800 20px Arial,sans-serif;fill:#fff}
+      .badge5{fill:#ef4444}
+      .badge33{fill:#f97316}
+      .badgeg{fill:#111827}
+      .badges{fill:#2563eb}
+    </style>
+  </defs>
+  <rect class="bg" width="2200" height="2600"/>
+  <text class="title" x="70" y="80">BMO Wire-by-Wire Connection Map</text>
+  <text class="sub" x="70" y="120">Read every row as one real cable. Yellow pads are solder points. Grey corner holes are screw holes only.</text>
+
+  <!-- Legend -->
+  <rect class="panel" x="1510" y="45" width="610" height="130"/>
+  <rect class="pad" x="1540" y="78" width="42" height="22"/><text class="label" x="1595" y="98">solder pad / header pin</text>
+  <circle class="hole" cx="1561" cy="137" r="18"/><line class="x" x1="1548" y1="124" x2="1574" y2="150"/><line class="x" x1="1574" y1="124" x2="1548" y2="150"/>
+  <text class="label" x="1595" y="145">screw hole only, no wire</text>
+
+  <!-- SECTION 1 POWER -->
+  <rect class="panel" x="70" y="200" width="2060" height="680"/>
+  <text class="h" x="100" y="250">1. Power: battery to charger to boost to ESP32</text>
+  <text class="small" x="100" y="280">Do this first. Battery unplugged while soldering. Check boost output is 5.0V before connecting ESP32.</text>
+
+  <!-- battery -->
+  <rect class="module" x="110" y="340" width="310" height="160"/>
+  <text class="h" x="150" y="385">Battery plug</text>
+  <text class="small" x="150" y="420">existing connector</text>
+  <rect class="pad" x="360" y="440" width="40" height="24"/><text class="tiny" x="260" y="458">red +</text>
+  <rect class="pad" x="360" y="470" width="40" height="24"/><text class="tiny" x="250" y="488">black -</text>
+
+  <!-- TP4056 -->
+  <rect class="module" x="570" y="315" width="330" height="220"/>
+  <text class="h" x="620" y="360">TP4056</text>
+  <text class="small" x="620" y="392">charger/protection</text>
+  <rect class="pad" x="570" y="430" width="40" height="24"/><text class="label" x="620" y="450">B+</text>
+  <rect class="pad" x="570" y="475" width="40" height="24"/><text class="label" x="620" y="495">B-</text>
+  <rect class="pad" x="860" y="430" width="40" height="24"/><text class="label" x="780" y="450">OUT+</text>
+  <rect class="pad" x="860" y="475" width="40" height="24"/><text class="label" x="780" y="495">OUT-</text>
+
+  <!-- boost -->
+  <rect class="module" x="1070" y="315" width="340" height="220"/>
+  <text class="h" x="1125" y="360">5V boost</text>
+  <text class="small" x="1125" y="392">set/check output = 5.0V</text>
+  <rect class="pad" x="1070" y="430" width="40" height="24"/><text class="label" x="1120" y="450">IN+</text>
+  <rect class="pad" x="1070" y="475" width="40" height="24"/><text class="label" x="1120" y="495">IN-</text>
+  <rect class="pad" x="1370" y="430" width="40" height="24"/><text class="label" x="1280" y="450">OUT+</text>
+  <rect class="pad" x="1370" y="475" width="40" height="24"/><text class="label" x="1280" y="495">OUT-</text>
+
+  <!-- bundles -->
+  <rect class="bundle5" x="1550" y="380" width="210" height="64"/>
+  <text class="white" x="1580" y="420">5V bundle</text>
+  <rect class="bundleg" x="1550" y="490" width="230" height="64"/>
+  <text class="white" x="1580" y="530">GND bundle</text>
+  <rect class="bundle33" x="1550" y="610" width="230" height="64"/>
+  <text class="white" x="1580" y="650">3V3 bundle</text>
+
+  <!-- ESP power target -->
+  <rect class="module" x="1850" y="345" width="220" height="260"/>
+  <text class="h" x="1885" y="390">ESP32</text>
+  <rect class="pad" x="1850" y="435" width="40" height="24"/><text class="label" x="1905" y="455">5V/VIN</text>
+  <rect class="pad" x="1850" y="485" width="40" height="24"/><text class="label" x="1905" y="505">GND</text>
+  <rect class="pad" x="1850" y="635" width="40" height="24"/><text class="label" x="1905" y="655">3V3</text>
+
+  <!-- wires power -->
+  <path class="wire5" d="M400 452 L570 442"/><circle class="badge5" cx="485" cy="435" r="18"/><text class="num" x="479" y="442">1</text>
+  <path class="wireg" d="M400 482 L570 487"/><circle class="badgeg" cx="485" cy="507" r="18"/><text class="num" x="479" y="514">2</text>
+  <path class="wire5" d="M900 442 L1070 442"/><circle class="badge5" cx="985" cy="422" r="18"/><text class="num" x="979" y="429">3</text>
+  <path class="wireg" d="M900 487 L1070 487"/><circle class="badgeg" cx="985" cy="512" r="18"/><text class="num" x="979" y="519">4</text>
+  <path class="wire5" d="M1410 442 L1550 412"/><circle class="badge5" cx="1485" cy="420" r="18"/><text class="num" x="1479" y="427">5</text>
+  <path class="wireg" d="M1410 487 L1550 522"/><circle class="badgeg" cx="1485" cy="512" r="18"/><text class="num" x="1479" y="519">6</text>
+  <path class="wire5" d="M1760 412 L1850 447"/><circle class="badge5" cx="1815" cy="425" r="18"/><text class="num" x="1809" y="432">7</text>
+  <path class="wireg" d="M1780 522 L1850 497"/><circle class="badgeg" cx="1815" cy="535" r="18"/><text class="num" x="1809" y="542">8</text>
+  <path class="wire33" d="M1850 647 L1780 647 L1780 642"/><circle class="badge33" cx="1812" cy="672" r="18"/><text class="num" x="1806" y="679">9</text>
+
+  <text class="label" x="100" y="610">Bundle means: strip the wire ends, twist the same-voltage wires together, solder, then cover with heat-shrink.</text>
+  <text class="small" x="100" y="648">The 5V bundle later also receives wires to amp VIN and PIR VCC. The GND bundle receives all black ground wires.</text>
+
+  <!-- SECTION 2 TFT -->
+  <rect class="panel" x="70" y="930" width="2060" height="470"/>
+  <text class="h" x="100" y="980">2. TFT screen: every cable from screen pad to destination</text>
+  <rect class="module" x="120" y="1045" width="430" height="260"/>
+  <text class="h" x="160" y="1090">1.8&quot; ST7735S TFT</text>
+  <circle class="hole" cx="500" cy="1080" r="18"/><line class="x" x1="487" y1="1067" x2="513" y2="1093"/><line class="x" x1="513" y1="1067" x2="487" y2="1093"/>
+  <text class="tiny" x="410" y="1120">screw hole only</text>
+  <rect class="pad" x="510" y="1140" width="40" height="24"/><text class="label" x="380" y="1160">VCC</text>
+  <rect class="pad" x="510" y="1175" width="40" height="24"/><text class="label" x="380" y="1195">GND</text>
+  <rect class="pad" x="510" y="1210" width="40" height="24"/><text class="label" x="380" y="1230">SCK/SCL</text>
+  <rect class="pad" x="510" y="1245" width="40" height="24"/><text class="label" x="380" y="1265">SDA/MOSI</text>
+  <rect class="pad" x="510" y="1280" width="40" height="24"/><text class="label" x="380" y="1300">RST/RES</text>
+
+  <rect class="module" x="880" y="1045" width="260" height="260"/>
+  <text class="h" x="925" y="1090">ESP32</text>
+  <rect class="pad" x="880" y="1210" width="40" height="24"/><text class="label" x="935" y="1230">GPIO47</text>
+  <rect class="pad" x="880" y="1245" width="40" height="24"/><text class="label" x="935" y="1265">GPIO21</text>
+  <rect class="pad" x="880" y="1280" width="40" height="24"/><text class="label" x="935" y="1300">GPIO40</text>
+  <rect class="pad" x="1100" y="1140" width="40" height="24"/><text class="label" x="965" y="1160">3V3 bundle</text>
+  <rect class="pad" x="1100" y="1175" width="40" height="24"/><text class="label" x="965" y="1195">GND bundle</text>
+
+  <rect class="module" x="1320" y="1045" width="430" height="260"/>
+  <text class="h" x="1360" y="1090">More TFT pads</text>
+  <rect class="pad" x="1320" y="1140" width="40" height="24"/><text class="label" x="1375" y="1160">DC/A0</text>
+  <rect class="pad" x="1320" y="1175" width="40" height="24"/><text class="label" x="1375" y="1195">CS</text>
+  <rect class="pad" x="1320" y="1210" width="40" height="24"/><text class="label" x="1375" y="1230">BLK/LED</text>
+  <rect class="module" x="1850" y="1045" width="220" height="260"/>
+  <text class="h" x="1888" y="1090">ESP32</text>
+  <rect class="pad" x="1850" y="1140" width="40" height="24"/><text class="label" x="1905" y="1160">GPIO41</text>
+  <rect class="pad" x="1850" y="1175" width="40" height="24"/><text class="label" x="1905" y="1195">GPIO42</text>
+  <rect class="pad" x="1850" y="1210" width="40" height="24"/><text class="label" x="1905" y="1230">3V3 bundle</text>
+
+  <path class="wire33" d="M550 1152 L1100 1152"/><text class="tiny" x="640" y="1138">TFT VCC -> 3V3 bundle</text>
+  <path class="wireg" d="M550 1187 L1100 1187"/><text class="tiny" x="640" y="1173">TFT GND -> GND bundle</text>
+  <path class="wireb" d="M550 1222 L880 1222"/><text class="tiny" x="640" y="1208">TFT SCK -> GPIO47</text>
+  <path class="wiregr" d="M550 1257 L880 1257"/><text class="tiny" x="640" y="1243">TFT MOSI -> GPIO21</text>
+  <path class="wireo" d="M550 1292 L880 1292"/><text class="tiny" x="640" y="1278">TFT RST -> GPIO40</text>
+  <path class="wirep" d="M1360 1152 L1850 1152"/><text class="tiny" x="1450" y="1138">TFT DC -> GPIO41</text>
+  <path class="wirey" d="M1360 1187 L1850 1187"/><text class="tiny" x="1450" y="1173">TFT CS -> GPIO42</text>
+  <path class="wire33" d="M1360 1222 L1850 1222"/><text class="tiny" x="1450" y="1208">TFT BLK -> 3V3 bundle</text>
+
+  <!-- SECTION 3 AUDIO -->
+  <rect class="panel" x="70" y="1450" width="2060" height="500"/>
+  <text class="h" x="100" y="1500">3. Mic, amplifier, and speaker</text>
+
+  <rect class="module" x="120" y="1565" width="430" height="270"/>
+  <text class="h" x="160" y="1610">INMP441 Mic</text>
+  <rect class="pad" x="510" y="1645" width="40" height="24"/><text class="label" x="375" y="1665">VDD</text>
+  <rect class="pad" x="510" y="1680" width="40" height="24"/><text class="label" x="375" y="1700">GND</text>
+  <rect class="pad" x="510" y="1715" width="40" height="24"/><text class="label" x="375" y="1735">SCK/BCLK</text>
+  <rect class="pad" x="510" y="1750" width="40" height="24"/><text class="label" x="375" y="1770">WS/LRCL</text>
+  <rect class="pad" x="510" y="1785" width="40" height="24"/><text class="label" x="375" y="1805">SD</text>
+  <rect class="pad" x="510" y="1820" width="40" height="24"/><text class="label" x="375" y="1840">L/R</text>
+
+  <rect class="module" x="860" y="1565" width="300" height="270"/>
+  <text class="h" x="910" y="1610">ESP32</text>
+  <rect class="pad" x="860" y="1645" width="40" height="24"/><text class="label" x="915" y="1665">3V3 bundle</text>
+  <rect class="pad" x="860" y="1680" width="40" height="24"/><text class="label" x="915" y="1700">GND bundle</text>
+  <rect class="pad" x="860" y="1715" width="40" height="24"/><text class="label" x="915" y="1735">GPIO1</text>
+  <rect class="pad" x="860" y="1750" width="40" height="24"/><text class="label" x="915" y="1770">GPIO2</text>
+  <rect class="pad" x="860" y="1785" width="40" height="24"/><text class="label" x="915" y="1805">GPIO14</text>
+  <rect class="pad" x="860" y="1820" width="40" height="24"/><text class="label" x="915" y="1840">GND bundle</text>
+
+  <path class="wire33" d="M550 1657 L860 1657"/><text class="tiny" x="620" y="1642">mic VDD -> 3V3</text>
+  <path class="wireg" d="M550 1692 L860 1692"/><text class="tiny" x="620" y="1677">mic GND -> GND</text>
+  <path class="wireb" d="M550 1727 L860 1727"/><text class="tiny" x="620" y="1712">mic SCK -> GPIO1</text>
+  <path class="wiregr" d="M550 1762 L860 1762"/><text class="tiny" x="620" y="1747">mic WS -> GPIO2</text>
+  <path class="wirey" d="M550 1797 L860 1797"/><text class="tiny" x="620" y="1782">mic SD -> GPIO14</text>
+  <path class="wireg" d="M550 1832 L860 1832"/><text class="tiny" x="620" y="1817">mic L/R -> GND</text>
+
+  <rect class="module" x="1300" y="1565" width="360" height="270"/>
+  <text class="h" x="1340" y="1610">MAX98357A Amp</text>
+  <rect class="pad" x="1300" y="1645" width="40" height="24"/><text class="label" x="1355" y="1665">VIN -> 5V bundle</text>
+  <rect class="pad" x="1300" y="1680" width="40" height="24"/><text class="label" x="1355" y="1700">GND -> GND</text>
+  <rect class="pad" x="1300" y="1715" width="40" height="24"/><text class="label" x="1355" y="1735">BCLK -> GPIO1</text>
+  <rect class="pad" x="1300" y="1750" width="40" height="24"/><text class="label" x="1355" y="1770">LRC -> GPIO2</text>
+  <rect class="pad" x="1300" y="1785" width="40" height="24"/><text class="label" x="1355" y="1805">DIN -> GPIO39</text>
+  <rect class="pad" x="1620" y="1715" width="40" height="24"/><text class="label" x="1675" y="1735">SPK+</text>
+  <rect class="pad" x="1620" y="1750" width="40" height="24"/><text class="label" x="1675" y="1770">SPK-</text>
+  <rect class="module" x="1850" y="1680" width="220" height="110"/>
+  <text class="h" x="1895" y="1720">Speaker</text>
+  <rect class="pad" x="1850" y="1735" width="40" height="24"/><text class="label" x="1905" y="1755">+</text>
+  <rect class="pad" x="1850" y="1770" width="40" height="24"/><text class="label" x="1905" y="1790">-</text>
+  <path class="wire5" d="M1220 1657 L1300 1657"/><text class="tiny" x="1195" y="1642">5V</text>
+  <path class="wireg" d="M1220 1692 L1300 1692"/><text class="tiny" x="1190" y="1677">GND</text>
+  <path class="wireb" d="M1160 1727 L1300 1727"/><text class="tiny" x="1180" y="1712">GPIO1</text>
+  <path class="wiregr" d="M1160 1762 L1300 1762"/><text class="tiny" x="1180" y="1747">GPIO2</text>
+  <path class="wirey" d="M1160 1797 L1300 1797"/><text class="tiny" x="1180" y="1782">GPIO39</text>
+  <path class="wire5" d="M1660 1727 L1850 1747"/><text class="tiny" x="1710" y="1715">speaker +</text>
+  <path class="wireg" d="M1660 1762 L1850 1782"/><text class="tiny" x="1710" y="1778">speaker -</text>
+
+  <!-- SECTION 4 SENSORS -->
+  <rect class="panel" x="70" y="2000" width="2060" height="430"/>
+  <text class="h" x="100" y="2050">4. PIR sensor and top touch pad</text>
+
+  <rect class="module" x="120" y="2115" width="420" height="220"/>
+  <text class="h" x="160" y="2160">PIR sensor</text>
+  <rect class="pad" x="500" y="2195" width="40" height="24"/><text class="label" x="390" y="2215">VCC</text>
+  <rect class="pad" x="500" y="2230" width="40" height="24"/><text class="label" x="390" y="2250">OUT</text>
+  <rect class="pad" x="500" y="2265" width="40" height="24"/><text class="label" x="390" y="2285">GND</text>
+  <rect class="module" x="880" y="2115" width="300" height="220"/>
+  <text class="h" x="930" y="2160">ESP32 / bundles</text>
+  <rect class="pad" x="880" y="2195" width="40" height="24"/><text class="label" x="935" y="2215">5V bundle</text>
+  <rect class="pad" x="880" y="2230" width="40" height="24"/><text class="label" x="935" y="2250">GPIO38</text>
+  <rect class="pad" x="880" y="2265" width="40" height="24"/><text class="label" x="935" y="2285">GND bundle</text>
+  <path class="wire5" d="M540 2207 L880 2207"/><text class="tiny" x="625" y="2192">PIR VCC -> 5V</text>
+  <path class="wirep" d="M540 2242 L880 2242"/><text class="tiny" x="625" y="2227">PIR OUT -> GPIO38</text>
+  <path class="wireg" d="M540 2277 L880 2277"/><text class="tiny" x="625" y="2262">PIR GND -> GND</text>
+
+  <rect class="module" x="1300" y="2115" width="330" height="220"/>
+  <text class="h" x="1340" y="2160">Copper touch pad</text>
+  <rect x="1365" y="2190" width="110" height="70" fill="#b87333" stroke="#7c2d12" stroke-width="4" rx="10"/>
+  <rect class="pad" x="1510" y="2212" width="40" height="24"/><text class="label" x="1355" y="2295">one green wire</text>
+  <rect class="module" x="1800" y="2115" width="230" height="220"/>
+  <text class="h" x="1850" y="2160">ESP32</text>
+  <rect class="pad" x="1800" y="2212" width="40" height="24"/><text class="label" x="1855" y="2232">GPIO3</text>
+  <path class="wiregr" d="M1550 2224 L1800 2224"/><text class="tiny" x="1605" y="2209">touch -> GPIO3</text>
+
+  <text class="label" x="100" y="2500">If a row says "bundle", it means the wire joins the heat-shrinked solder splice, not a module pad. If a row says GPIO, solder to that ESP32 header pin.</text>
+</svg>
