@@ -27,11 +27,44 @@ The microphone is already wired. The conversation pipeline is already sketched. 
 
 - **🎙️ Push-to-talk via the touch sensor.** Press BMO. Tell it anything. Let go.
 - **🧠 Real conversations** — Whisper for speech-to-text → Claude or GPT-4o-mini for the reply → OpenAI TTS streamed back through the speaker.
-- **🎭 Mood-aware responses.** BMO listens with `MOOD_LISTEN`, thinks with `MOOD_THINK`, talks with `MOOD_TALK` — and chooses voice tone based on what it just said.
+- **🎭 Mood-aware responses.** BMO listens with `MOOD_LISTEN`, thinks with `MOOD_THINKING`, talks with `MOOD_TALK` — and chooses voice tone based on what it just said.
 - **🌐 Wi-Fi setup over the web simulator.** No serial-cable provisioning. No hardcoded credentials in flash.
-- **🎨 BMO-style voice synthesis.** TTS output gets pitch-shifted and bit-crushed to match BMO's chiptune cadence, automatically.
+- **🎨 Tiny toy voice synthesis.** Generic toy-computer phrases get pitch-shifted, bit-crushed, and baked as compact 4-bit ADPCM clips.
 
 This isn't vaporware — most of the path is already in [`documentation.html`](documentation.html) under "Extending BMO." The hardware is ready today. Stay tuned, or [fork the repo](#) and beat us to it.
+
+---
+
+## 🛰️ The dashboard — BMO's brain on the web
+
+A full Next.js 15 admin lives under [`dashboard/`](dashboard/). It's the cloud half of BMO: the device talks to it over HTTPS, you tune BMO's personality through it, and you keep an eye on what BMO is up to from anywhere.
+
+- **🔐 Single-admin auth that just works.** One operator, one password (argon2id), one device fingerprint header. No OAuth dance, no multi-tenant clutter — exactly what a personal robot needs.
+- **🔄 Rotatable device fingerprint.** A separate secret that lives only in firmware flash. Lose the device, rotate the fingerprint in the dashboard, the old BMO can't talk to your account anymore.
+- **💸 Live OpenRouter credit meter.** See remaining balance update in real time so BMO never goes silent mid-conversation because the wallet ran dry.
+- **📜 Activity log.** Every request the device makes — STT, LLM, TTS — with latency, status, and which stage failed if anything went wrong. Debugging from the couch.
+- **🎭 Edit BMO's soul.** The system prompt, voice, model picks for brain/STT/TTS, and personality dials are all editable in the **Soul** tab. Changes ship to the device on its next request.
+- **🎤 Curate songs and skills.** Drop in WAVs the device can sing back, or wire new tool-call skills BMO can trigger.
+- **🛡️ Server-only secrets, enforced.** A `check-bundle-secrets` build step scans the client bundle for any leaked server key and fails the deploy if it finds one. Even the CI placeholder is a deliberate canary.
+- **🚀 Vercel-ready.** Push to `master`, the dashboard ships. Full walk-through in [`dashboard/docs/DEPLOY.md`](dashboard/docs/DEPLOY.md).
+
+```
+ESP32-C3 ──HTTPS + X-BMO-Fingerprint──▶ Vercel (Next.js 15)
+                                             │
+                                             ├─▶ Supabase (admin, soul, songs, activity)
+                                             └─▶ OpenRouter (Whisper / Claude / TTS)
+```
+
+Local dev:
+
+```bash
+cd dashboard
+cp .env.example .env.local   # fill in Supabase + OpenRouter + AUTH_SESSION_SECRET
+npm install
+npm run dev
+```
+
+Then visit http://localhost:3000 and follow the onboarding wizard.
 
 ---
 
@@ -94,13 +127,10 @@ The Next.js + Tailwind simulator is on the roadmap (see [AI features coming soon
 - **Node.js 22+** — [nodejs.org](https://nodejs.org/) or use [nvm](https://github.com/nvm-sh/nvm)
 - **Chrome or Edge** desktop browser. Safari and Firefox don't support Web Serial yet.
 
-### Optional (for baking real BMO voice clips)
+### Optional (for baking tiny toy voice clips)
 
-- **Python 3.10+** with `pydub`:
-  ```bash
-  pip install pydub
-  ```
-- **ffmpeg** — only if you want to bake `.mp3` files (`.wav` works without it):
+- **Python 3.10+**
+- **ffmpeg** — used by the generator and by MP3/WAV conversion:
   ```bash
   brew install ffmpeg          # macOS
   sudo apt install ffmpeg      # Ubuntu/Debian
@@ -153,8 +183,13 @@ BMO/
 ├── documentation.html          ← read this first
 ├── firmware/bmo_face_anim/     ← the embedded C++ that makes BMO live
 │   ├── src/main.cpp
-│   ├── audio/                  ← drop your WAV files here
-│   └── tools/bake_audio.py     ← turns WAVs into a C header
+│   ├── audio/                  ← generated/drop-in WAV files live here
+│   └── tools/                  ← voice generator + ADPCM baker
+├── dashboard/                  ← Next.js 15 admin + cloud brain (Vercel-ready)
+│   ├── app/                    ← App Router pages: home, soul, songs, providers, activity, fingerprint
+│   ├── lib/                    ← auth, env validation, OpenRouter + Supabase clients
+│   ├── supabase/               ← schema + migrations + seed
+│   └── docs/DEPLOY.md          ← end-to-end Vercel + Supabase walk-through
 └── .kiro/steering/             ← CAD skills for designing BMO's 3D-printed shell
 ```
 
