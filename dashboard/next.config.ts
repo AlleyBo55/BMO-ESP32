@@ -2,10 +2,8 @@ import type { NextConfig } from 'next';
 
 const config: NextConfig = {
   reactStrictMode: true,
-  experimental: {
-    // Enable typed routes in App Router for better DX
-    typedRoutes: true,
-  },
+  // Enable typed routes in App Router for better DX
+  typedRoutes: true,
 };
 
 export default config;
