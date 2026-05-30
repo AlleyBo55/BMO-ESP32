@@ -656,6 +656,7 @@ export async function POST(req: Request): Promise<Response> {
         voice: cfg.tts_voice,
         text: ttsText,
         systemPrompt: ttsDirection,
+        verbatim: !isSinging,
         signal: ac.signal,
       }),
     );

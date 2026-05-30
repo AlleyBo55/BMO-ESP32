@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-5DCBC2?style=for-the-badge)](LICENSE)
 [![ESP32-C3](https://img.shields.io/badge/ESP32--C3-Super%20Mini-1A2D63?style=for-the-badge)](https://www.espressif.com/en/products/socs/esp32-c3)
-[![AI Coming Soon](https://img.shields.io/badge/AI-coming%20soon-F81F40?style=for-the-badge)](#-ai-features-coming-soon)
+[![AI Live](https://img.shields.io/badge/AI-live-7AE582?style=for-the-badge)](#-ai-features--live-now)
 [![Made with ♥](https://img.shields.io/badge/made%20with-♥-FFE066?style=for-the-badge)](#)
 
 > ## ⭐ **Star it. Fork it. Build it.** ⭐
@@ -19,19 +19,42 @@
 
 ---
 
-## 🤖 AI features — coming soon
+## 🤖 AI features — live now
 
-BMO is about to learn to listen.
+BMO listens, thinks, and talks back.
 
-The microphone is already wired. The conversation pipeline is already sketched. The next release ships:
+Hold the touch sensor, speak, and let go. BMO captures your voice, ships it to the cloud brain, and answers out loud in its own little voice — with a face that shows every step.
 
-- **🎙️ Push-to-talk via the touch sensor.** Press BMO. Tell it anything. Let go.
-- **🧠 Real conversations** — Whisper for speech-to-text → Claude or GPT-4o-mini for the reply → OpenAI TTS streamed back through the speaker.
-- **🎭 Mood-aware responses.** BMO listens with `MOOD_LISTEN`, thinks with `MOOD_THINKING`, talks with `MOOD_TALK` — and chooses voice tone based on what it just said.
-- **🌐 Wi-Fi setup over the web simulator.** No serial-cable provisioning. No hardcoded credentials in flash.
-- **🎨 Tiny toy voice synthesis.** Generic toy-computer phrases get pitch-shifted, bit-crushed, and baked as compact 4-bit ADPCM clips.
+- **🎙️ Push-to-talk via the touch sensor.** Press and hold BMO, say anything, release. Walkie-talkie style.
+- **🧠 Real conversations** — speech-to-text → LLM → streaming text-to-speech, all through the dashboard's `/api/brain` route on OpenRouter.
+- **🗣️ Real lip-sync.** The talking mouth tracks the live audio envelope, so BMO's mouth actually moves with its voice — eyes stay open and lively.
+- **🧩 Conversation memory.** BMO remembers the last several turns, so follow-ups make sense ("what color is an apple?" → "red" → BMO knows what you mean). A gbrain-inspired profile learns durable facts (name, favorites) and the newest value wins.
+- **🎭 Mood-aware status face.** Listening shows X-eyes + a signal glitch, thinking pulses a processing orb with a datamosh flicker, talking lip-syncs — so the screen is never frozen during network work.
+- **🌐 Wi-Fi setup over a captive portal.** No serial-cable provisioning, no hardcoded credentials in flash — a rotatable device fingerprint is the only secret on the chip.
+- **🎨 Baked toy-voice greetings.** Short BMO-voice greetings are generated once from the dashboard TTS, downsampled, and baked as compact 4-bit ADPCM clips that play instantly (and lip-sync) on a normal touch.
 
-This isn't vaporware — most of the path is already in [`documentation.html`](documentation.html) under "Extending BMO." The hardware is ready today. Stay tuned, or [fork the repo](#) and beat us to it.
+Full architecture and the debugging war stories are in [`documentation.html`](documentation.html) under "Voice, brain & memory."
+
+---
+
+## 🧠 BMO's brain — what we adopted from GBrain
+
+BMO's memory layer is modeled on [Garry Tan's GBrain](https://github.com/garrytan/gbrain), the agent brain behind his OpenClaw/Hermes deployments. GBrain ships its capabilities as markdown "skills" for an autonomous coding agent plus a daemon on a VPS — which can't run inside Vercel's stateless functions. So BMO **reproduces GBrain's load-bearing ideas as real TypeScript** on the stack it already has (Supabase pgvector + OpenRouter embeddings). These are working modules backed by real tables and RPCs, not inert skill files.
+
+| GBrain idea | BMO calls it | Implemented in |
+| --- | --- | --- |
+| `capture` + brain-first recall | **Persistent memory** — every exchange embedded, recalled by meaning before replying | `dashboard/lib/brain.ts` |
+| `think` (synthesis + gap analysis) | **Reasoned recall** — a cited answer plus an honest "what I don't know yet" | `dashboard/lib/brain/synthesize.ts` |
+| self-wiring knowledge graph + `enrich` | **Connected memories** — people/places/topics as entities with typed links | `dashboard/lib/brain/graph.ts`, `entities.ts` |
+| enrich-the-entity-over-time | **Child profile** — durable facts (name, favorites, fears), newest value wins | `dashboard/lib/brain/profile.ts` |
+| salience + dedup | **Importance & tidy-up** — score what matters, find near-duplicates | `dashboard/lib/brain/salience.ts` |
+| 24/7 **dream cycle** (`maintain`) | **Dream cycle** — scheduled consolidate/dedup/re-score pass | `dashboard/lib/brain/consolidate.ts` + `/api/brain/dream` |
+| `find_trajectory` / timeline | **Timeline** — what happened, in what order | `dashboard/lib/brain/timeline.ts` |
+| hybrid search | **Hybrid search** — vector + keyword fused via reciprocal-rank fusion | `dashboard/lib/brain/search.ts` |
+| `gbrain doctor` / `skillpack-check` | **Brain health** — table/embeddings/recall checks → one score | `dashboard/lib/brain/doctor.ts` |
+| dream-cycle idea, made spontaneous | **Random thoughts** — when played with, BMO recalls, muses one line in its own voice, speaks it, and remembers it | `dashboard/lib/thoughts.ts` + `/api/brain/idle-thought` |
+
+The brain is always an **enhancement, never a hard dependency**: every function degrades to a safe no-op and logs a warning if a table or upstream call is missing, so `/api/brain` never fails because a brain feature did. A migration seam (`GBRAIN_HTTP_URL` + `GBRAIN_TOKEN`) is already stubbed in `lib/brain.ts` so capture/recall can later point at a real `gbrain serve --http` daemon on a VPS without changing the routes or firmware.
 
 ---
 

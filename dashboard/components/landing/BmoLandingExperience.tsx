@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import type { CSSProperties, ReactElement } from 'react';
 
 import {
+  BRAIN_CAPABILITIES,
   COMPONENTS,
   FEATURES,
   GBRAIN_REPO_URL,
@@ -81,6 +82,7 @@ export default function BmoLandingExperience(): ReactElement {
         <nav className={styles.navLinks} aria-label="Landing navigation">
           <a href="#world">Signals</a>
           <a href="#features">Features</a>
+          <a href="#brain">Brain</a>
           <a href="#inside">Inside</a>
           <Link href="/wiki">Wiki</Link>
         </nav>
@@ -309,6 +311,17 @@ export default function BmoLandingExperience(): ReactElement {
             nods to Garry Tan&apos;s GBrain: moments become preferences,
             synthesis, and useful gaps.
           </p>
+        </div>
+
+        <div className={styles.brainGrid}>
+          {BRAIN_CAPABILITIES.map((cap) => (
+            <article className={styles.brainCard} key={cap.title}>
+              <span>{cap.gbrain}</span>
+              <h3>{cap.title}</h3>
+              <p>{cap.body}</p>
+              <code>{cap.module}</code>
+            </article>
+          ))}
         </div>
 
         <div className={styles.repoPanel}>

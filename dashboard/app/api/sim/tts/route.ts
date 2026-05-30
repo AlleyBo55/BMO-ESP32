@@ -83,6 +83,7 @@ export async function POST(req: Request): Promise<Response> {
         voice,
         text,
         systemPrompt: direction,
+        verbatim: !sing,
         signal: req.signal,
       }),
     )) {

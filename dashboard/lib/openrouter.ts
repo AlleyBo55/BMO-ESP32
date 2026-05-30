@@ -110,6 +110,16 @@ export interface SynthesizeStreamRequest {
   voice: string;
   text: string;
   systemPrompt?: string;
+  /**
+   * When true (default), the user text is wrapped in an explicit
+   * "read this script verbatim" instruction. This is REQUIRED for the
+   * chat-audio models (`gpt-audio-mini`) which otherwise treat the text as a
+   * conversational turn and speak a *different* reply than what was sent —
+   * the cause of "BMO says something other than the logged reply". Set to
+   * false for singing, where the lyrics must be performed as-is without the
+   * spoken-script framing.
+   */
+  verbatim?: boolean;
   signal?: AbortSignal | undefined;
 }
 
@@ -388,7 +398,15 @@ export async function* synthesizeStream(
   if (req.systemPrompt !== undefined && req.systemPrompt.length > 0) {
     messages.push({ role: 'system', content: req.systemPrompt });
   }
-  messages.push({ role: 'user', content: req.text });
+  // For verbatim speech (default), wrap the text so the chat-audio model can't
+  // mistake it for a prompt to answer — it must read EXACTLY these words. The
+  // delimiters keep the model from speaking the instruction itself. Singing
+  // passes verbatim:false so the lyrics aren't wrapped.
+  const verbatim = req.verbatim !== false;
+  const userContent = verbatim
+    ? `Read this text aloud exactly as written, word for word, and say nothing else:\n\n"""\n${req.text}\n"""`
+    : req.text;
+  messages.push({ role: 'user', content: userContent });
 
   const body = {
     model: req.model,

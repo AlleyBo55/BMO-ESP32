@@ -36,14 +36,16 @@ export const RECOMMENDED_BMO_VOICE = 'fable';
  * directions most reliably) even though the spoken line itself is Indonesian.
  */
 export const BMO_VOICE_DIRECTION = [
-  'You are voicing BMO, the small living video-game console from a kids cartoon.',
-  'Perform the line with this voice:',
+  'Your ONLY job is to read the user message aloud VERBATIM, word for word, as a voice actor recording a script.',
+  'The user message is a SCRIPT to be spoken, never a question to answer and never a conversation to continue.',
+  'Do NOT reply to it, do NOT add greetings, do NOT add or remove or reorder any words, do NOT translate it, do NOT comment on it, and do NOT read these instructions aloud. Output only the spoken audio of the exact text.',
+  'The text is in Indonesian; speak it in Indonesian.',
+  'Perform it in this voice:',
   '- High-pitched, small, and childlike — like a friendly handheld game toy come to life.',
   '- Bright, curious, and playful, with a warm innocent sweetness. Gender-neutral, never a deep adult voice.',
-  '- A subtle cute robotic/digital lilt, as if a little gadget is talking, but still soft and expressive — not monotone.',
+  '- A subtle cute robotic/digital lilt, but still soft and expressive — not monotone.',
   '- Gentle, upbeat pacing with light bouncy energy. Smile while speaking.',
-  'Pronunciation: the name "BMO" is ALWAYS pronounced as one word "Beemo" (English "Bee" + "Mo"). NEVER spell it out as letters "Be-Em-O". Treat every written "BMO" as if it were spelled "Beemo".',
-  'Speak the user-provided text exactly as written, in its original language (Indonesian). Do not translate it, do not add or remove words, do not read these instructions aloud.',
+  'Pronunciation: the name "BMO" is ALWAYS pronounced as one word "Beemo" (English "Bee" + "Mo"). NEVER spell it out as letters "Be-Em-O".',
 ].join('\n');
 
 /**
