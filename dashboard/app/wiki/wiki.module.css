@@ -83,10 +83,71 @@
   line-height: 1.7;
 }
 
+.heroActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 30px;
+}
+
+.heroActions a,
+.envDeck article,
+.heroStats span {
+  border: 3px solid #10251f;
+  border-radius: 9px;
+  background: rgba(255, 253, 240, 0.82);
+  box-shadow: 0 6px 0 rgba(16, 37, 31, 0.16);
+}
+
+.heroActions a {
+  display: inline-flex;
+  min-height: 50px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 18px;
+  color: #10251f;
+  font-weight: 1000;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.heroActions a:first-child {
+  background: #ffe36d;
+  box-shadow: 0 6px 0 #ff8e7f;
+}
+
+.heroStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  width: min(720px, 100%);
+  margin-top: 28px;
+}
+
+.heroStats span {
+  display: grid;
+  gap: 2px;
+  padding: 13px 14px;
+  color: rgba(17, 37, 31, 0.72);
+  font-size: 0.8rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.heroStats strong {
+  color: #0f6f61;
+  font-size: 1.9rem;
+  line-height: 1;
+}
+
 .section,
 .repoSection {
   padding: 70px 0;
   scroll-margin-top: 94px;
+}
+
+.launchSection {
+  padding-top: 44px;
 }
 
 .sectionIntro {
@@ -124,6 +185,304 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.envDeck,
+.prereqGrid,
+.serviceGrid {
+  display: grid;
+  gap: 10px;
+}
+
+.envDeck {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-bottom: 14px;
+}
+
+.envDeck article {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.envDeck code,
+.serviceGrid code,
+.firmwareEnv code,
+.wireRow code,
+.launchBody code {
+  color: #10251f;
+  font-family: var(--font-geist-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.78rem;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.envDeck span,
+.envDeck b {
+  color: rgba(17, 37, 31, 0.7);
+  font-size: 0.74rem;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.envDeck b {
+  width: fit-content;
+  border: 2px solid rgba(16, 37, 31, 0.16);
+  border-radius: 999px;
+  background: #d6f5e5;
+  padding: 3px 7px;
+  color: #0f6f61;
+  text-transform: uppercase;
+}
+
+.prereqGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 14px 0;
+}
+
+.prereqGrid article,
+.servicePanel,
+.firmwareEnv,
+.wiringPanel,
+.launchCard,
+.liveChecklist {
+  border: 3px solid #10251f;
+  border-radius: 12px;
+  background: rgba(255, 253, 240, 0.76);
+  box-shadow: 8px 8px 0 rgba(16, 37, 31, 0.14);
+}
+
+.prereqGrid article {
+  padding: 18px;
+}
+
+.prereqGrid h3,
+.servicePanel h3,
+.firmwareEnv h3,
+.launchBody h3,
+.liveChecklist h3 {
+  margin: 0;
+  color: #10251f;
+  font-size: 1.25rem;
+}
+
+.prereqGrid p,
+.servicePanel p,
+.firmwareEnv p,
+.launchBody p,
+.proofBox p,
+.liveChecklist span {
+  margin: 10px 0 0;
+  color: rgba(17, 37, 31, 0.74);
+  font-weight: 730;
+  line-height: 1.55;
+}
+
+.servicePanel,
+.firmwareEnv,
+.wiringPanel {
+  margin-top: 14px;
+  padding: 20px;
+}
+
+.servicePanel {
+  display: grid;
+  grid-template-columns: 0.42fr 1fr;
+  gap: 22px;
+}
+
+.serviceGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.serviceGrid article {
+  display: grid;
+  gap: 8px;
+  border-left: 3px solid rgba(15, 111, 97, 0.28);
+  padding-left: 12px;
+}
+
+.serviceGrid span,
+.proofBox span {
+  color: #0f6f61;
+  font-size: 0.72rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.serviceGrid p,
+.serviceGrid small {
+  margin: 0;
+  color: rgba(17, 37, 31, 0.75);
+  font-weight: 740;
+  line-height: 1.45;
+}
+
+.firmwareEnv {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.48fr) minmax(0, 1fr);
+  gap: 22px;
+}
+
+.firmwareEnv > div:last-child {
+  display: grid;
+  gap: 8px;
+}
+
+.firmwareEnv > div:last-child p {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.38fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  margin: 0;
+  border-left: 3px solid rgba(15, 111, 97, 0.28);
+  padding-left: 12px;
+}
+
+.firmwareEnv span {
+  color: rgba(17, 37, 31, 0.78);
+  font-weight: 740;
+}
+
+.wiringPanel {
+  scroll-margin-top: 112px;
+}
+
+.wireTable {
+  display: grid;
+  gap: 6px;
+}
+
+.wireHeader,
+.wireRow {
+  display: grid;
+  grid-template-columns: 0.8fr 1.08fr 1fr 1fr 0.92fr 1.7fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.wireHeader {
+  color: #0f6f61;
+  font-size: 0.68rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.wireRow {
+  border: 2px solid rgba(16, 37, 31, 0.16);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.42);
+  padding: 10px;
+}
+
+.wireRow > span {
+  width: fit-content;
+  border: 2px solid #10251f;
+  border-radius: 7px;
+  background: #ffe36d;
+  padding: 4px 7px;
+  color: #10251f;
+  font-size: 0.66rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.wireRow b,
+.wireRow strong {
+  color: #10251f;
+  font-weight: 1000;
+}
+
+.wireRow p {
+  margin: 0;
+  color: rgba(17, 37, 31, 0.74);
+  font-size: 0.88rem;
+  font-weight: 730;
+  line-height: 1.4;
+}
+
+.launchMap {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.launchCard {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 18px;
+  padding: 20px;
+}
+
+.launchNumber {
+  color: rgba(15, 111, 97, 0.24);
+  font-size: 4.4rem;
+  font-weight: 1000;
+  line-height: 0.9;
+}
+
+.launchBody ul {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding-left: 18px;
+}
+
+.launchBody li {
+  color: rgba(17, 37, 31, 0.78);
+  font-weight: 740;
+  line-height: 1.48;
+}
+
+.launchBody pre {
+  overflow-x: auto;
+  margin: 16px 0 0;
+  border: 2px solid rgba(16, 37, 31, 0.16);
+  border-radius: 9px;
+  background: #10251f;
+  padding: 14px;
+}
+
+.launchBody pre code {
+  color: #eaffef;
+  white-space: pre;
+}
+
+.proofBox {
+  margin-top: 16px;
+  border-left: 4px solid #0f6f61;
+  padding-left: 12px;
+}
+
+.liveChecklist {
+  margin-top: 14px;
+  padding: 20px;
+}
+
+.liveChecklist div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.liveChecklist span {
+  position: relative;
+  margin: 0;
+  padding-left: 22px;
+}
+
+.liveChecklist span::before {
+  position: absolute;
+  top: 0.46em;
+  left: 0;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #10251f;
+  border-radius: 999px;
+  background: #54c77b;
+  content: "";
 }
 
 .card,
@@ -318,10 +677,35 @@
 }
 
 @media (max-width: 980px) {
+  .heroStats,
+  .envDeck,
+  .prereqGrid,
+  .servicePanel,
+  .serviceGrid,
+  .firmwareEnv,
+  .wireRow,
+  .liveChecklist div,
   .cardGrid,
   .flow,
   .repoSection {
     grid-template-columns: 1fr;
+  }
+
+  .wireHeader {
+    display: none;
+  }
+
+  .firmwareEnv > div:last-child p {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .launchCard {
+    grid-template-columns: 1fr;
+  }
+
+  .launchNumber {
+    font-size: 3.4rem;
   }
 
   .tableRow,
@@ -352,12 +736,20 @@
 
   .nav {
     flex-wrap: wrap;
-    gap: 14px;
+    gap: 10px 14px;
     border-radius: 16px;
+  }
+
+  .nav a {
+    font-size: 0.76rem;
   }
 
   .nav a:first-child {
     width: 100%;
+  }
+
+  .heroActions a {
+    flex: 1 1 180px;
   }
 
   .hero h1 {
@@ -383,7 +775,13 @@
   .tableRow,
   .flowStep,
   .stateRow,
-  .noteCard {
+  .noteCard,
+  .prereqGrid article,
+  .servicePanel,
+  .firmwareEnv,
+  .wiringPanel,
+  .launchCard,
+  .liveChecklist {
     box-shadow: 6px 6px 0 rgba(16, 37, 31, 0.12);
   }
 }

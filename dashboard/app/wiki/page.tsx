@@ -93,6 +93,264 @@ const ENV_VARS = [
   },
 ] as const;
 
+const PREREQUISITES = [
+  {
+    title: 'Local tools',
+    body: 'Node.js 20.18+, npm, Git, PlatformIO, Python 3.10+, and ffmpeg if you regenerate voice assets.',
+  },
+  {
+    title: 'Cloud accounts',
+    body: 'GitHub for the repo, Vercel for the Next.js deploy, Supabase for persistence, and OpenRouter for STT, LLM, and TTS.',
+  },
+  {
+    title: 'Network',
+    body: 'A 2.4 GHz Wi-Fi network. ESP32-C3 cannot join 5 GHz Wi-Fi, and weak RSSI will make voice feel slow.',
+  },
+  {
+    title: 'Safety habit',
+    body: 'Keep one scratch buffer for temporary secrets. Never commit firmware .env, include/secrets.h, API keys, or plaintext fingerprints.',
+  },
+] as const;
+
+const SERVICE_KEYS = [
+  {
+    service: 'OpenRouter',
+    need: 'Account, API key, and a small credit balance.',
+    env: 'OPENROUTER_API_KEY',
+    proof: 'The credits endpoint returns remaining balance.',
+  },
+  {
+    service: 'Supabase',
+    need: 'Project URL, publishable key, secret key, schema, and seed.',
+    env: 'NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, SUPABASE_SECRET_KEY',
+    proof: 'Tables exist, RLS is enabled, and the config seed row exists.',
+  },
+  {
+    service: 'Vercel',
+    need: 'Project rooted at dashboard/ with all env vars applied.',
+    env: 'Dashboard env vars',
+    proof: 'Production deployment builds and /wiki returns 200.',
+  },
+  {
+    service: 'Firmware',
+    need: 'Wi-Fi, deployed origin, and device fingerprint.',
+    env: 'firmware/bmo_face_anim/.env',
+    proof: 'The pre-build hook renders include/secrets.h, then upload succeeds.',
+  },
+] as const;
+
+const FIRMWARE_ENV = [
+  ['WIFI_SSID', 'Primary 2.4 GHz Wi-Fi name'],
+  ['WIFI_PASS', 'Primary Wi-Fi password'],
+  ['WIFI_SSID2', 'Optional fallback Wi-Fi name'],
+  ['WIFI_PASS2', 'Optional fallback Wi-Fi password'],
+  ['DASHBOARD_URL', 'Production origin, no trailing slash'],
+  ['FINGERPRINT', 'Plaintext fingerprint from onboarding or rotation'],
+] as const;
+
+const WIRING_PORTS = [
+  {
+    group: 'Power',
+    part: 'ESP32-C3 Super Mini',
+    modulePin: 'USB-C / 5V',
+    esp32Pin: 'USB power or 5V/VIN',
+    voltage: '5V input',
+    note: 'Use a real data cable for flashing; keep grounds common.',
+  },
+  {
+    group: 'Power',
+    part: 'Shared logic rail',
+    modulePin: '3V3',
+    esp32Pin: 'ESP32 3V3',
+    voltage: '3.3V',
+    note: 'Display, mic, and touch logic live on 3.3V. Never feed 5V into GPIO.',
+  },
+  {
+    group: 'Display',
+    part: 'ST7735 TFT',
+    modulePin: 'VCC',
+    esp32Pin: '3V3',
+    voltage: '3.3V',
+    note: 'Use the same ground as the ESP32.',
+  },
+  {
+    group: 'Display',
+    part: 'ST7735 TFT',
+    modulePin: 'GND',
+    esp32Pin: 'GND',
+    voltage: '0V',
+    note: 'Common ground.',
+  },
+  {
+    group: 'Display',
+    part: 'ST7735 TFT',
+    modulePin: 'LED / BLK',
+    esp32Pin: '3V3',
+    voltage: '3.3V',
+    note: 'Backlight on. Add control later only if you need dimming.',
+  },
+  {
+    group: 'Display',
+    part: 'ST7735 TFT',
+    modulePin: 'CS',
+    esp32Pin: 'GP7',
+    voltage: '3.3V logic',
+    note: 'Chip select for the TFT.',
+  },
+  {
+    group: 'Display',
+    part: 'ST7735 TFT',
+    modulePin: 'RST / RESET',
+    esp32Pin: 'GP10',
+    voltage: '3.3V logic',
+    note: 'Panel reset.',
+  },
+  {
+    group: 'Display',
+    part: 'ST7735 TFT',
+    modulePin: 'DC / A0',
+    esp32Pin: 'GP3',
+    voltage: '3.3V logic',
+    note: 'Command/data select.',
+  },
+  {
+    group: 'Display',
+    part: 'ST7735 TFT',
+    modulePin: 'SDA / MOSI',
+    esp32Pin: 'GP6',
+    voltage: '3.3V logic',
+    note: 'SPI data to screen.',
+  },
+  {
+    group: 'Display',
+    part: 'ST7735 TFT',
+    modulePin: 'SCK / SCL',
+    esp32Pin: 'GP4',
+    voltage: '3.3V logic',
+    note: 'SPI clock.',
+  },
+  {
+    group: 'Audio out',
+    part: 'MAX98357A amp',
+    modulePin: 'VIN / VCC',
+    esp32Pin: '3V3 preferred',
+    voltage: '3.3V or supported 5V',
+    note: '3.3V is safest for a single-rail build. If using 5V on amp VIN, keep I2S logic 3.3V and grounds common.',
+  },
+  {
+    group: 'Audio out',
+    part: 'MAX98357A amp',
+    modulePin: 'GND',
+    esp32Pin: 'GND',
+    voltage: '0V',
+    note: 'Common ground with ESP32 and speaker amp.',
+  },
+  {
+    group: 'Audio out',
+    part: 'MAX98357A amp',
+    modulePin: 'BCLK',
+    esp32Pin: 'GP0',
+    voltage: '3.3V logic',
+    note: 'Shared I2S bit clock with the mic.',
+  },
+  {
+    group: 'Audio out',
+    part: 'MAX98357A amp',
+    modulePin: 'LRC / WS',
+    esp32Pin: 'GP1',
+    voltage: '3.3V logic',
+    note: 'Shared I2S word-select clock with the mic.',
+  },
+  {
+    group: 'Audio out',
+    part: 'MAX98357A amp',
+    modulePin: 'DIN',
+    esp32Pin: 'GP2',
+    voltage: '3.3V logic',
+    note: 'I2S audio data into the amp.',
+  },
+  {
+    group: 'Audio out',
+    part: '8 ohm speaker',
+    modulePin: 'SPK+ / SPK-',
+    esp32Pin: 'Amp output pads',
+    voltage: 'speaker output',
+    note: 'Do not connect the speaker directly to ESP32 GPIO.',
+  },
+  {
+    group: 'Audio in',
+    part: 'INMP441 mic',
+    modulePin: 'VDD',
+    esp32Pin: '3V3',
+    voltage: '3.3V',
+    note: 'Do not power the mic from 5V.',
+  },
+  {
+    group: 'Audio in',
+    part: 'INMP441 mic',
+    modulePin: 'GND',
+    esp32Pin: 'GND',
+    voltage: '0V',
+    note: 'Common ground.',
+  },
+  {
+    group: 'Audio in',
+    part: 'INMP441 mic',
+    modulePin: 'SCK / BCLK',
+    esp32Pin: 'GP0',
+    voltage: '3.3V logic',
+    note: 'Shared I2S clock from the ESP32.',
+  },
+  {
+    group: 'Audio in',
+    part: 'INMP441 mic',
+    modulePin: 'WS / LRCL',
+    esp32Pin: 'GP1',
+    voltage: '3.3V logic',
+    note: 'Shared I2S word-select from the ESP32.',
+  },
+  {
+    group: 'Audio in',
+    part: 'INMP441 mic',
+    modulePin: 'SD / DOUT',
+    esp32Pin: 'GP5',
+    voltage: '3.3V logic',
+    note: 'Critical: do not use GP8 or GP9. They are boot strapping pins and caused silent captures.',
+  },
+  {
+    group: 'Audio in',
+    part: 'INMP441 mic',
+    modulePin: 'L/R',
+    esp32Pin: 'GND',
+    voltage: '0V',
+    note: 'Sets the mic slot. Use the tickle mic self-test if the other slot is louder.',
+  },
+  {
+    group: 'Touch',
+    part: 'TTP223 touch sensor',
+    modulePin: 'VCC',
+    esp32Pin: '3V3',
+    voltage: '3.3V',
+    note: 'Keeps touch output ESP32-safe.',
+  },
+  {
+    group: 'Touch',
+    part: 'TTP223 touch sensor',
+    modulePin: 'GND',
+    esp32Pin: 'GND',
+    voltage: '0V',
+    note: 'Common ground.',
+  },
+  {
+    group: 'Touch',
+    part: 'TTP223 touch sensor',
+    modulePin: 'OUT / SIG',
+    esp32Pin: 'GP20',
+    voltage: '3.3V logic',
+    note: 'Firmware uses INPUT_PULLDOWN to avoid phantom touches.',
+  },
+] as const;
+
 const LAUNCH_GUIDE = [
   {
     phase: '00',
@@ -103,6 +361,7 @@ const LAUNCH_GUIDE = [
       'Install Node.js 20.18 or newer for the web app.',
       'Install PlatformIO for the ESP32-C3 firmware.',
       'Install Python 3.10+ and ffmpeg if you plan to regenerate voice clips.',
+      'Create or prepare Supabase, Vercel, OpenRouter, and GitHub accounts.',
     ],
     command: `git clone https://github.com/AlleyBo55/BMO-ESP32.git
 cd BMO
@@ -147,6 +406,7 @@ dashboard/supabase/seed.sql`,
       'Set the Vercel root directory to dashboard.',
       'Add the five environment variables below for Production, Preview, and Development.',
       'Mark every server-only value as sensitive.',
+      'Make sure OpenRouter has a credit balance before testing voice.',
     ],
     command: `openssl rand -hex 32
 # paste that value into AUTH_SESSION_SECRET`,
@@ -169,14 +429,14 @@ dashboard/supabase/seed.sql`,
     title: 'Pair the tiny brain',
     goal: 'Give the ESP32-C3 Wi-Fi, the deployed origin, and its rotatable fingerprint.',
     tasks: [
-      'Copy the firmware secrets template.',
-      'Fill Wi-Fi SSID, Wi-Fi password, deployed origin, and BMO fingerprint.',
+      'Copy firmware/bmo_face_anim/.env.example to firmware/bmo_face_anim/.env.',
+      'Fill Wi-Fi SSID, Wi-Fi password, optional fallback Wi-Fi, deployed origin, and BMO fingerprint.',
       'Flash the firmware to the ESP32-C3.',
       'Open the serial monitor and watch for Wi-Fi plus brain readiness.',
     ],
     command: `cd firmware/bmo_face_anim
-cp include/secrets.h.in include/secrets.h
-$EDITOR include/secrets.h
+cp .env.example .env
+$EDITOR .env
 pio run -e esp32c3_supermini -t upload
 pio device monitor -e esp32c3_supermini`,
     proof: 'Serial output shows Wi-Fi connected and the brain client ready.',
@@ -217,7 +477,7 @@ const LIVE_CHECKS = [
   'Private operator controls are not linked from public nav and are not in sitemap.xml.',
   'Supabase anon role cannot read private tables directly.',
   'Server-only env vars are marked sensitive in Vercel.',
-  'include/secrets.h is still gitignored and never appears in git status.',
+  'firmware .env and include/secrets.h are gitignored and never appear in git status.',
   'Old fingerprint fails after rotation; new fingerprint works after re-flash.',
 ] as const;
 
@@ -228,6 +488,7 @@ export default function WikiPage(): React.ReactElement {
         <nav className={styles.nav} aria-label="Wiki navigation">
           <Link href="/">BMO home</Link>
           <a href="#launch">Launch</a>
+          <a href="#wiring">Ports</a>
           <a href="#components">Components</a>
           <a href="#voice">Voice</a>
           <a href="#brain">Brain</a>
@@ -252,12 +513,12 @@ export default function WikiPage(): React.ReactElement {
             launch phases
           </span>
           <span>
-            <strong>{ENV_VARS.length}</strong>
-            env vars
+            <strong>{WIRING_PORTS.length}</strong>
+            ports mapped
           </span>
           <span>
-            <strong>1</strong>
-            device fingerprint
+            <strong>{ENV_VARS.length}</strong>
+            env vars
           </span>
         </div>
       </header>
@@ -285,6 +546,90 @@ export default function WikiPage(): React.ReactElement {
             </article>
           ))}
         </div>
+
+        <div className={styles.prereqGrid}>
+          {PREREQUISITES.map((item) => (
+            <article key={item.title}>
+              <h3>{item.title}</h3>
+              <p>{item.body}</p>
+            </article>
+          ))}
+        </div>
+
+        <div className={styles.servicePanel} aria-labelledby="service-title">
+          <div>
+            <p className={styles.microcopy}>Cloud ingredients</p>
+            <h3 id="service-title">OpenRouter, Supabase, Vercel, firmware.</h3>
+          </div>
+          <div className={styles.serviceGrid}>
+            {SERVICE_KEYS.map((service) => (
+              <article key={service.service}>
+                <span>{service.service}</span>
+                <p>{service.need}</p>
+                <code>{service.env}</code>
+                <small>{service.proof}</small>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <div className={styles.firmwareEnv} aria-labelledby="firmware-env-title">
+          <div>
+            <p className={styles.microcopy}>Firmware .env</p>
+            <h3 id="firmware-env-title">The six values that become secrets.h.</h3>
+            <p>
+              The pre-build hook reads this gitignored file and renders
+              include/secrets.h before PlatformIO compiles.
+            </p>
+          </div>
+          <div>
+            {FIRMWARE_ENV.map(([key, value]) => (
+              <p key={key}>
+                <code>{key}</code>
+                <span>{value}</span>
+              </p>
+            ))}
+          </div>
+        </div>
+
+        <section
+          id="wiring"
+          className={styles.wiringPanel}
+          aria-labelledby="wiring-title"
+        >
+          <div className={styles.sectionIntro}>
+            <p className={styles.microcopy}>Ports, GPIO, volts</p>
+            <h2 id="wiring-title">Wire BMO like this.</h2>
+            <p>
+              This is the current ESP32-C3 firmware pin map. Keep every ground
+              common, keep logic at 3.3V, and avoid GP8/GP9 for microphone data.
+            </p>
+          </div>
+
+          <div className={styles.wireTable}>
+            <div className={styles.wireHeader}>
+              <span>Area</span>
+              <span>Part</span>
+              <span>Module pin</span>
+              <span>ESP32-C3 pin</span>
+              <span>Volt</span>
+              <span>Note</span>
+            </div>
+            {WIRING_PORTS.map((wire) => (
+              <article
+                className={styles.wireRow}
+                key={`${wire.group}-${wire.part}-${wire.modulePin}`}
+              >
+                <span>{wire.group}</span>
+                <b>{wire.part}</b>
+                <code>{wire.modulePin}</code>
+                <code>{wire.esp32Pin}</code>
+                <strong>{wire.voltage}</strong>
+                <p>{wire.note}</p>
+              </article>
+            ))}
+          </div>
+        </section>
 
         <div className={styles.launchMap}>
           {LAUNCH_GUIDE.map((stage) => (
