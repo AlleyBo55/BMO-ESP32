@@ -4,8 +4,12 @@ import { Buffer } from 'node:buffer';
 
 import { requireAdmin } from '@/lib/api-auth';
 import { getConfig } from '@/lib/config';
-import { OpenRouterError, synthesizeStream } from '@/lib/openrouter';
-import { BMO_SINGING_DIRECTION, BMO_VOICE_DIRECTION } from '@/lib/voice';
+import { OpenRouterError, synthesizeSpeech, synthesizeStream } from '@/lib/openrouter';
+import {
+  BMO_SINGING_DIRECTION,
+  BMO_SPEECH_INSTRUCTIONS,
+  BMO_SPEECH_MODEL,
+} from '@/lib/voice';
 import { applyRadioFx } from '@/lib/voice-fx';
 import { wrapPcm16AsWav } from '@/lib/wav';
 
@@ -69,24 +73,31 @@ export async function POST(req: Request): Promise<Response> {
   const cfg = await getConfig();
   const voice = typeof parsed.voice === 'string' && parsed.voice.length > 0 ? parsed.voice : cfg.tts_voice;
   // When `sing` is true the simulator wants BMO to actually sing the text, so
-  // we steer synthesis with the singing direction instead of the speaking one.
+  // we use the chat-audio model (which can perform a melody). Plain speech uses
+  // the dedicated verbatim TTS so the audio matches the text exactly.
   const sing = parsed.sing === true;
-  const direction = sing ? BMO_SINGING_DIRECTION : BMO_VOICE_DIRECTION;
 
   // Buffer the whole synthesis so we can emit a finite, playable WAV. The
   // robotic-radio effect is applied as the PCM streams in.
   const chunks: Buffer[] = [];
   try {
-    for await (const frame of applyRadioFx(
-      synthesizeStream({
-        model: cfg.tts_model,
-        voice,
-        text,
-        systemPrompt: direction,
-        verbatim: !sing,
-        signal: req.signal,
-      }),
-    )) {
+    const source = sing
+      ? synthesizeStream({
+          model: cfg.tts_model,
+          voice,
+          text,
+          systemPrompt: BMO_SINGING_DIRECTION,
+          verbatim: false,
+          signal: req.signal,
+        })
+      : synthesizeSpeech({
+          model: BMO_SPEECH_MODEL,
+          voice,
+          text,
+          instructions: BMO_SPEECH_INSTRUCTIONS,
+          signal: req.signal,
+        });
+    for await (const frame of applyRadioFx(source)) {
       chunks.push(frame);
     }
   } catch (err) {

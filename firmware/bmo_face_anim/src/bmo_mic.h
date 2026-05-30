@@ -42,6 +42,15 @@ bool micBegin();
 // ONLY_LEFT when false.
 bool micSetChannel(bool right);
 
+// Sets software decimation: 1 = full 16 kHz, 2 = 8 kHz (doubles the seconds a
+// fixed buffer holds), etc. The WAV header sent to STT MUST use
+// micEffectiveRate() to match. 8 kHz is telephone quality — fine for speech.
+void micSetDecimation(uint8_t factor);
+
+// The effective capture sample rate after decimation (16000 / factor). Use
+// this for the outgoing WAV header so STT decodes the audio at the right speed.
+uint32_t micEffectiveRate();
+
 // Captures up to `kMicCaptureSamples` samples from the mic, blocking the
 // caller. Returns the number of samples actually captured. The capture stops
 // early when:

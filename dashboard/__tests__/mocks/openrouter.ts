@@ -164,6 +164,24 @@ export function createOpenRouterServer(options: OpenRouterMockOptions = {}): {
       });
     }),
 
+    http.post('https://openrouter.ai/api/v1/audio/speech', async ({ request }) => {
+      const body = await captureJson(request);
+      captured.push({
+        url: request.url,
+        method: request.method,
+        body,
+        headers: recordHeaders(request),
+      });
+      // The dedicated TTS endpoint returns RAW audio bytes (not SSE). We emit
+      // `audioFrames` worth of PCM16 fixture so byte-count assertions match
+      // the streaming chat-audio path.
+      const buf = new Uint8Array(PCM16_FIXTURE_BYTES * audioFrames);
+      return new HttpResponse(buf, {
+        status: 200,
+        headers: { 'Content-Type': 'audio/pcm;rate=24000;channels=1' },
+      });
+    }),
+
     http.get('https://openrouter.ai/api/v1/credits', ({ request }) => {
       captured.push({
         url: request.url,

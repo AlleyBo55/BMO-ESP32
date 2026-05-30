@@ -518,6 +518,100 @@ function extractAudioB64(event: unknown): string | null {
 }
 
 /* -------------------------------------------------------------------------- */
+/* synthesizeSpeech — dedicated TTS via /audio/speech                          */
+/* -------------------------------------------------------------------------- */
+
+export interface SpeechRequest {
+  /** Dedicated TTS model, e.g. `openai/gpt-4o-mini-tts-2025-12-15`. */
+  model: string;
+  voice: string;
+  /** The exact text to read aloud. */
+  text: string;
+  /**
+   * Optional delivery instructions (the gpt-4o-mini-tts model supports an
+   * `instructions` field for tone/character — it does NOT change the words).
+   */
+  instructions?: string;
+  signal?: AbortSignal | undefined;
+}
+
+/**
+ * Speaks `text` via OpenRouter's dedicated `/audio/speech` endpoint and yields
+ * raw PCM16 mono 24 kHz chunks as they arrive.
+ *
+ * WHY THIS EXISTS: the chat-audio path ({@link synthesizeStream}) sends text
+ * as a conversational turn to a chat model, which then IMPROVISES a different
+ * spoken reply than the text we sent — the cause of "BMO says something other
+ * than the logged reply". This endpoint is a true text-to-speech: it reads the
+ * `input` verbatim and structurally cannot answer or rephrase. Use this for
+ * spoken replies; keep the chat-audio path only for singing (which genuinely
+ * needs the model to perform a melody).
+ *
+ * Returns PCM16 (response_format `pcm`) = 24 kHz mono 16-bit LE, matching what
+ * the firmware/brain route already consume.
+ */
+export async function* synthesizeSpeech(req: SpeechRequest): AsyncIterable<Buffer> {
+  const timed = makeTimedSignal(TIMEOUT_TTS_CHUNK_MS, req.signal);
+
+  const body: Record<string, unknown> = {
+    model: req.model,
+    input: req.text,
+    voice: req.voice,
+    response_format: 'pcm',
+  };
+  if (req.instructions !== undefined && req.instructions.length > 0) {
+    body.instructions = req.instructions;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${OPENROUTER_BASE_URL}/audio/speech`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(body),
+      signal: timed.signal,
+    });
+  } catch (err) {
+    timed.cancel();
+    throw abortToError(err, 'tts');
+  }
+
+  if (!response.ok) {
+    const msg = await readErrorMessage(response);
+    timed.cancel();
+    throw new OpenRouterError('tts', response.status, msg);
+  }
+  if (response.body === null) {
+    timed.cancel();
+    throw new OpenRouterError('tts', response.status, 'response had no body');
+  }
+
+  const reader = response.body.getReader();
+  try {
+    while (true) {
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch (err) {
+        throw abortToError(err, 'tts');
+      }
+      if (chunk.done) break;
+      timed.refresh();
+      if (chunk.value && chunk.value.length > 0) {
+        yield Buffer.from(chunk.value);
+      }
+    }
+  } finally {
+    timed.cancel();
+    try {
+      reader.releaseLock();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /* fetchCredits                                                                */
 /* -------------------------------------------------------------------------- */
 

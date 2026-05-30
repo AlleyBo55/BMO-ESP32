@@ -12,6 +12,7 @@ import { getConfig } from '@/lib/config';
 import {
   chat,
   OpenRouterError,
+  synthesizeSpeech,
   synthesizeStream,
   transcribe,
   type OpenRouterTool,
@@ -20,7 +21,8 @@ import { findSongByTitle, listSongs } from '@/lib/songs';
 import type { BmoConfig, Song } from '@/lib/types';
 import {
   BMO_SINGING_DIRECTION,
-  BMO_VOICE_DIRECTION,
+  BMO_SPEECH_INSTRUCTIONS,
+  BMO_SPEECH_MODEL,
   buildSingTool,
   extractSingLyrics,
 } from '@/lib/voice';
@@ -638,28 +640,36 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   // ------------------- open TTS stream eagerly ------------------------------
-  // Singing branch: when the LLM called the `sing` tool we synthesize the
-  // sung lyrics with BMO's singing voice direction instead of speaking the
-  // plain reply. Same wire format as the spoken path — only the input text
-  // and the system prompt differ. The reply-text header reflects what was
-  // actually voiced so the device/screen shows the lyrics.
+  // Two distinct synthesis paths:
+  //   - SPEAKING (default): the dedicated /audio/speech TTS (synthesizeSpeech)
+  //     reads the reply VERBATIM. A true TTS can't improvise, so the audio
+  //     always matches the logged reply text — this fixes "BMO says something
+  //     different than the reply box".
+  //   - SINGING: keep the chat-audio model (synthesizeStream), which is the
+  //     one that can actually perform a melody from the lyrics.
   const isSinging = singLyrics !== null;
   const ttsText = isSinging ? singLyrics! : replyText;
-  const ttsDirection = isSinging ? BMO_SINGING_DIRECTION : BMO_VOICE_DIRECTION;
   const voicedReplyText = isSinging ? `🎵 ${singLyrics!}` : replyText;
 
   let iterator: AsyncIterator<Buffer>;
   try {
-    const it = applyRadioFx(
-      synthesizeStream({
-        model: cfg.tts_model,
-        voice: cfg.tts_voice,
-        text: ttsText,
-        systemPrompt: ttsDirection,
-        verbatim: !isSinging,
-        signal: ac.signal,
-      }),
-    );
+    const source = isSinging
+      ? synthesizeStream({
+          model: cfg.tts_model,
+          voice: cfg.tts_voice,
+          text: ttsText,
+          systemPrompt: BMO_SINGING_DIRECTION,
+          verbatim: false,
+          signal: ac.signal,
+        })
+      : synthesizeSpeech({
+          model: BMO_SPEECH_MODEL,
+          voice: cfg.tts_voice,
+          text: ttsText,
+          instructions: BMO_SPEECH_INSTRUCTIONS,
+          signal: ac.signal,
+        });
+    const it = applyRadioFx(source);
     iterator = it[Symbol.asyncIterator]();
   } catch (err) {
     clearTimeout(budgetTimer);

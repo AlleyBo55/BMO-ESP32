@@ -30,6 +30,15 @@ import type { ChatToolCall, OpenRouterTool } from '@/lib/openrouter';
 export const RECOMMENDED_BMO_VOICE = 'fable';
 
 /**
+ * Dedicated text-to-speech model used for SPOKEN replies via the
+ * `/audio/speech` endpoint ({@link synthesizeSpeech}). This is a true TTS that
+ * reads the input verbatim — it cannot improvise like the chat-audio model.
+ * Kept separate from `cfg.tts_model` (which stays the chat-audio model used
+ * for SINGING, where the model must perform a melody).
+ */
+export const BMO_SPEECH_MODEL = 'openai/gpt-4o-mini-tts-2025-12-15';
+
+/**
  * Delivery direction passed as the TTS system prompt. Describes BMO's vocal
  * character so the audio model performs the line in-character instead of
  * reading it flat. Kept in English (the models follow English stage
@@ -46,6 +55,18 @@ export const BMO_VOICE_DIRECTION = [
   '- A subtle cute robotic/digital lilt, but still soft and expressive — not monotone.',
   '- Gentle, upbeat pacing with light bouncy energy. Smile while speaking.',
   'Pronunciation: the name "BMO" is ALWAYS pronounced as one word "Beemo" (English "Bee" + "Mo"). NEVER spell it out as letters "Be-Em-O".',
+].join('\n');
+
+/**
+ * Delivery instructions for the DEDICATED TTS endpoint (gpt-4o-mini-tts via
+ * /audio/speech). Unlike {@link BMO_VOICE_DIRECTION}, this does NOT need to
+ * fight against chat behavior — a true TTS model reads the `input` verbatim no
+ * matter what, so this only steers TONE. Passed as the `instructions` field.
+ */
+export const BMO_SPEECH_INSTRUCTIONS = [
+  'Voice: a small, high-pitched, childlike toy robot — bright, curious, sweet, gender-neutral, never a deep adult voice.',
+  'Delivery: gentle and upbeat with light bouncy energy and a subtle cute robotic lilt; smile while speaking.',
+  'Pronounce the name "BMO" as one word, "Beemo", never as letters.',
 ].join('\n');
 
 /**

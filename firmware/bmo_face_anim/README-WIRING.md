@@ -149,3 +149,69 @@ Timeouts (matching `docs/HARDWARE-SMOKE-TEST.md` expectations):
 
 TLS verification is currently `setInsecure()` — the fingerprint header is the
 real authentication boundary. Cert pinning is a future task.
+
+---
+
+## Flashing a prebuilt binary (no PlatformIO)
+
+Every push to `master` that touches the firmware — and every `v*` tag —
+triggers the **Firmware build** GitHub Action
+(`.github/workflows/firmware-build.yml`), which compiles the firmware and
+publishes ready-to-flash images:
+
+- **Per-commit builds** → the workflow run's **Artifacts** (`bmo-firmware-<sha>`).
+- **Tagged releases** (`v1.2.3`) → attached to the GitHub **Release**.
+
+Each bundle contains:
+
+| File | Use |
+| --- | --- |
+| `bmo-firmware-merged.bin` | Single image, flashed to `0x0` in one command. The simplest path. |
+| `bootloader.bin`, `partitions.bin`, `boot_app0.bin`, `firmware.bin` | The individual images, for the multi-offset flow. |
+| `flash.sh` | Helper that wraps `esptool` and auto-detects the serial port. |
+
+### Quick flash
+
+Download + unzip the bundle, plug the board in via a **data** USB-C cable, then:
+
+```bash
+# only dependency:
+pip install esptool
+
+# from inside the unzipped folder:
+./flash.sh                 # auto-detects the port, flashes the merged image
+```
+
+Useful flags: `./flash.sh -p /dev/ttyACM0` (explicit port), `--erase` (wipe
+saved WiFi first), `--split` (use the 4 individual bins), `--monitor` (open a
+serial monitor after). Run `./flash.sh --help` for all options.
+
+If you'd rather call `esptool` yourself:
+
+```bash
+esptool.py --chip esp32c3 --baud 921600 write_flash -z \
+  --flash_mode dio --flash_freq 80m --flash_size detect \
+  0x0 bmo-firmware-merged.bin
+```
+
+### What's baked in vs. provisioned at runtime
+
+Publicly released images are **generic** — they ship with placeholder secrets,
+so they contain **no WiFi credentials and no dashboard fingerprint**. After
+flashing, BMO boots a `BMO-Setup-XXXX` WiFi hotspot; join it from your phone to
+enter your WiFi network and dashboard URL (handled by
+`bmo_provisioning.cpp`'s captive portal).
+
+The **dashboard fingerprint is compile-time only** — it is the auth token for
+`/api/brain` and is intentionally *not* settable through the portal. So a
+generic image animates faces, takes WiFi setup, and runs locally, but cannot
+talk to the cloud brain until you build a **personalised** image with your
+fingerprint compiled in:
+
+- **Locally**: fill `.env` (see `.env.example`) and `pio run -e esp32c3_supermini -t upload`.
+- **In CI (private artifact only)**: set the repo secret `BMO_FINGERPRINT`
+  (and optionally `BMO_WIFI_SSID` / `BMO_WIFI_PASS` and the `BMO_DASHBOARD_URL`
+  variable). The workflow then bakes them in and flags the artifact as private.
+  **Never attach a fingerprint-baked binary to a public release** — it embeds
+  your dashboard auth token.
+

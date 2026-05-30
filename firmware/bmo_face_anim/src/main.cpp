@@ -2595,7 +2595,7 @@ static void askBrain() {
   // but require a short minimum so the initial press debounce doesn't end the
   // capture before it starts.
   constexpr uint32_t kMinCaptureMs = 300;
-  constexpr uint32_t kMaxCaptureMs = 2000;  // matches kMicCaptureSamples (2s @ 16kHz)
+  constexpr uint32_t kMaxCaptureMs = 4000;  // ~4s: 8kHz decimated audio in the same 64KB buffer
   while (samples < pcmCapacity) {
     const uint32_t elapsed = millis() - captureStart;
     if (elapsed >= kMaxCaptureMs) break;
@@ -3150,6 +3150,12 @@ void setup() {
   } else {
     Serial.println("mic init failed; long-hold-to-ask will not work");
   }
+
+  // Capture at 8 kHz (decimate the shared 16 kHz I2S by 2). This doubles the
+  // push-to-talk window — ~4s of speech in the same 64 KB buffer — without
+  // growing RAM, which is what broke the TLS handshake when we tried a bigger
+  // buffer. 8 kHz is telephone quality; plenty for speech-to-text.
+  bmo::micSetDecimation(2);
 
   // ── MIC SELF-TEST ────────────────────────────────────────────────────────
   // On-demand via the TICKLE gesture (3 rapid taps), not at boot — boot timing
