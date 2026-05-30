@@ -5,7 +5,8 @@ import { after } from 'next/server';
 import { requireAdmin } from '@/lib/api-auth';
 import { captureExchange, formatRecallForPrompt, recall, type RecalledMemory } from '@/lib/brain';
 import { getConfig } from '@/lib/config';
-import { chat, OpenRouterError } from '@/lib/openrouter';
+import { chat, OpenRouterError, type OpenRouterTool } from '@/lib/openrouter';
+import { buildSingTool, extractSingLyrics } from '@/lib/voice';
 
 /**
  * POST /api/sim/brain — simulator LLM (brain) stage.
@@ -31,7 +32,23 @@ export const runtime = 'nodejs';
  */
 const LANGUAGE_DIRECTIVE = `\n\n[LANGUAGE]
 Always reply in Bahasa Indonesia (Indonesian), regardless of the language the user spoke. Use natural, warm, kid-friendly Indonesian. Avoid English loanwords unless a single specific term has no good Indonesian equivalent. Keep names of people, places, and brands as-is unless the Indonesian form is more familiar. Never narrate this rule, never apologize for it, never switch languages.
-[/LANGUAGE]`;
+[/LANGUAGE]
+
+[STYLE]
+Keep replies SHORT and direct — 1 to 2 short sentences for a normal question, like a quick chat between friends, not a paragraph. Answer the actual question FIRST and plainly, then you may add one short playful touch. Do not pile on adjectives, do not list many options, do not ramble. If the child asks a follow-up that depends on the previous turn, treat the recent conversation as the context and stay on that topic — do not change the subject on your own.
+[/STYLE]
+
+[NAME PRONUNCIATION]
+Write your own name as "BMO" in text, but it is always pronounced "Beemo" (like the English "Bee" + "Mo"), never spelled out letter by letter as "Be-Em-O".
+[/NAME]
+
+[CHILD]
+You are a companion to ONE child. Learn who they are from the conversation; never invent details.
+- If a [CHILD PROFILE] block below tells you the child's name, address them by it naturally and warmly.
+- If you do NOT yet know the child's name, gently and playfully ask for it once early in the chat, then use it afterwards. Ask only when you don't already know.
+- Whenever the child tells you their name (or corrects it), accept the newest one as the truth from then on, even if it differs from before.
+- Speech-to-text can garble names. If a stated name sounds garbled or uncertain, gently confirm it instead of guessing a different name.
+[/CHILD]`;
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -78,17 +95,31 @@ export async function POST(req: Request): Promise<Response> {
   const memoryBlock = formatRecallForPrompt(memories);
   const systemPrompt = cfg.soul_md + LANGUAGE_DIRECTIVE + memoryBlock;
 
+  // Expose the `sing` tool to the simulator's LLM exactly as the firmware
+  // route does, so the in-browser test decides to sing identically. (The
+  // simulator doesn't wire play_song; song playback isn't exercised here.)
+  const tools: OpenRouterTool[] = [];
+  const singSkill = cfg.skills.sing;
+  if (singSkill !== undefined && singSkill.enabled) {
+    tools.push(buildSingTool());
+  }
+
   try {
     const reply = await chat({
       model: cfg.llm_model,
       systemPrompt,
       messages: [{ role: 'user', content: userText }],
+      tools,
       signal: req.signal,
     });
 
+    // Did BMO choose to sing? Surface the lyrics so the simulator can voice
+    // them with the singing direction via /api/sim/tts.
+    const singLyrics = extractSingLyrics(reply.toolCalls);
+
     // Auto-grow the brain after responding (off the hot path).
     if (memoryEnabled) {
-      const refor = reply.text;
+      const refor = singLyrics !== null ? `🎵 ${singLyrics}` : reply.text;
       after(async () => {
         await captureExchange(userText, refor);
       });
@@ -97,6 +128,7 @@ export async function POST(req: Request): Promise<Response> {
     return jsonResponse(
       {
         reply: reply.text,
+        sing: singLyrics,
         ms: Date.now() - startedAt,
         model: cfg.llm_model,
         memoryUsed: memoryEnabled,

@@ -17,7 +17,8 @@ export type SkillName =
   | 'story'
   | 'comfort'
   | 'play_pretend'
-  | 'memory';
+  | 'memory'
+  | 'random_thoughts';
 
 /** Per-skill toggle plus optional opaque parameter bag. */
 export interface SkillState {

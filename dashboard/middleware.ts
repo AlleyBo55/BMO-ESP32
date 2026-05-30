@@ -17,8 +17,8 @@ import { getServiceClient } from '@/lib/supabase-admin';
  *   3. If admin count is zero, force every reachable route to `/onboarding`.
  *      `/onboarding` itself is allowed through.
  *   4. If admin count is one or more, `/onboarding` returns a hard 404 (the
- *      route is gone forever once setup completes), `/login` is allowed
- *      through, and every other path requires a valid session cookie.
+ *      route is gone forever once setup completes), `/` and `/login` are
+ *      allowed through, and every other path requires a valid session cookie.
  *      Valid sessions get an `x-bmo-username` request header forwarded
  *      downstream so admin pages can render the username without re-reading
  *      the cookie.
@@ -139,7 +139,7 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     return new NextResponse('not_found', { status: 404 });
   }
 
-  if (pathname === '/login') {
+  if (pathname === '/' || pathname === '/wiki' || pathname === '/login') {
     return NextResponse.next();
   }
 

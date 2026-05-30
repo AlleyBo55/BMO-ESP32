@@ -26,7 +26,7 @@ import { logout } from '@/app/(admin)/actions';
 interface NavItem {
   label: string;
   href:
-    | '/'
+    | '/dashboard'
     | '/soul'
     | '/skills'
     | '/songs'
@@ -37,7 +37,7 @@ interface NavItem {
 }
 
 const NAV_ITEMS: ReadonlyArray<NavItem> = [
-  { label: 'Home', href: '/' },
+  { label: 'Home', href: '/dashboard' },
   { label: 'Soul', href: '/soul' },
   { label: 'Skills', href: '/skills' },
   { label: 'Songs', href: '/songs' },

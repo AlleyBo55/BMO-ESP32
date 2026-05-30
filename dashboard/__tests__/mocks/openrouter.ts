@@ -47,8 +47,8 @@ export interface CapturedRequest {
 
 export interface OpenRouterMockOptions {
   /**
-   * If true, `/chat/completions` returns a streaming SSE response with audio
-   * chunks. Otherwise it returns a plain JSON `text` response.
+   * If true, `/chat/completions` can return streaming SSE audio chunks for
+   * requests that opt into streaming. Plain chat requests still return JSON.
    */
   streaming?: boolean;
   /** Frame count emitted by the streaming chat-completions handler. */
@@ -115,12 +115,15 @@ export function createOpenRouterServer(options: OpenRouterMockOptions = {}): {
         headers: recordHeaders(request),
       });
 
+      const acceptsEventStream =
+        request.headers.get('accept')?.toLowerCase().includes('text/event-stream') === true;
+      const bodyRequestsStream =
+        typeof body === 'object' &&
+        body !== null &&
+        'stream' in body &&
+        (body as { stream?: unknown }).stream === true;
       const wantsStream =
-        options.streaming === true ||
-        (typeof body === 'object' &&
-          body !== null &&
-          'stream' in body &&
-          (body as { stream?: unknown }).stream === true);
+        bodyRequestsStream || (options.streaming === true && acceptsEventStream);
 
       if (!wantsStream) {
         return HttpResponse.json({

@@ -51,7 +51,7 @@ export default function LoginPage(): ReactElement {
           // attached to the request that hits middleware. `router.replace`
           // + `router.refresh` race the RSC stream against the cookie set
           // and have hung in practice; a full document reload sidesteps it.
-          window.location.assign('/');
+          window.location.assign('/dashboard');
           return;
         }
         setError(result.error);

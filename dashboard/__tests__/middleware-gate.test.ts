@@ -1,8 +1,9 @@
 /**
  * Tests for `app/middleware.ts` — the onboarding/auth gate.
  *
- * Verifies the four documented branches:
+ * Verifies the documented branches:
  *   - Empty admin table + GET /        → 302 /onboarding
+ *   - Admin row exists + GET /          → pass-through public landing
  *   - Admin row exists + GET /onboarding → 404
  *   - Empty admin table + GET /onboarding → pass-through (no redirect)
  *   - Admin row + invalid session + GET /soul → 302 /login
@@ -64,6 +65,16 @@ describe('middleware', () => {
     const res = await middleware(makeRequest('/'));
     expect(res.status).toBe(307);
     expect(res.headers.get('location')).toMatch(/\/onboarding$/);
+  });
+
+  test('admin row exists + GET / passes through to public landing', async () => {
+    seedAdmin(mockClient, { username: 'admin', password_hash: 'unused' });
+    const { middleware } = await import('@/middleware');
+    const res = await middleware(makeRequest('/'));
+    expect(res.status).not.toBe(307);
+    expect(res.status).not.toBe(308);
+    expect(res.status).not.toBe(404);
+    expect(res.headers.get('location')).toBeNull();
   });
 
   test('admin row exists + GET /onboarding returns 404', async () => {

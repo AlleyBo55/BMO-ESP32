@@ -1,0 +1,1324 @@
+.page {
+  min-height: 100vh;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(255, 227, 109, 0.38), transparent 22rem),
+    radial-gradient(circle at 88% 18%, rgba(141, 227, 255, 0.42), transparent 25rem),
+    linear-gradient(180deg, #bff2de 0%, #d9f7f1 42%, #fff0aa 100%);
+  color: #11251f;
+  letter-spacing: 0;
+}
+
+.topbar {
+  position: fixed;
+  top: 18px;
+  right: 22px;
+  left: 22px;
+  z-index: 20;
+  display: flex;
+  width: min(1180px, calc(100% - 44px));
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 auto;
+  box-sizing: border-box;
+  border-radius: 18px;
+  padding: 8px 12px;
+  pointer-events: none;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease;
+}
+
+.topbar::before {
+  position: absolute;
+  inset: 0;
+  border: 2px solid rgba(16, 37, 31, 0.16);
+  border-radius: inherit;
+  background: rgba(246, 255, 239, 0.72);
+  box-shadow:
+    0 12px 34px rgba(16, 37, 31, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.56);
+  backdrop-filter: blur(18px) saturate(1.28);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.topbarScrolled {
+  transform: translateY(-2px);
+}
+
+.topbarScrolled::before {
+  opacity: 1;
+}
+
+.brand,
+.navLinks,
+.navLinks a {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #10251f;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.brandFace {
+  position: relative;
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #10251f;
+  border-radius: 8px;
+  background: #91e0c8;
+  box-shadow: 0 5px 0 rgba(16, 37, 31, 0.18);
+}
+
+.brandFace::before,
+.brandFace::after {
+  position: absolute;
+  top: 12px;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: #071411;
+  content: "";
+}
+
+.brandFace::before {
+  left: 10px;
+}
+
+.brandFace::after {
+  right: 10px;
+}
+
+.brandFace span {
+  width: 12px;
+  height: 6px;
+  margin-top: 10px;
+  border-bottom: 2px solid #213b31;
+  border-radius: 0 0 999px 999px;
+}
+
+.navLinks {
+  display: flex;
+  gap: 20px;
+}
+
+.navLinks a {
+  color: #11251f;
+  font-size: 0.9rem;
+  font-weight: 900;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.hero {
+  position: relative;
+  display: grid;
+  width: min(1180px, calc(100% - 36px));
+  min-height: 100svh;
+  grid-template-columns: minmax(300px, 0.74fr) minmax(440px, 1fr);
+  gap: clamp(28px, 6vw, 88px);
+  align-items: center;
+  margin: 0 auto;
+  padding: 92px 0 48px;
+}
+
+.hero::before {
+  position: absolute;
+  inset: 12% -12% 8% 38%;
+  z-index: 0;
+  border: 4px solid rgba(16, 37, 31, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.28);
+  content: "";
+  transform: rotate(-8deg);
+}
+
+.heroCopy,
+.toyStage,
+.questStrip {
+  position: relative;
+  z-index: 1;
+}
+
+.microcopy {
+  margin: 0 0 12px;
+  color: #0f6f61;
+  font-size: 0.78rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.heroCopy h1 {
+  margin: 0;
+  color: #fffdf0;
+  font-size: clamp(6rem, 16vw, 12rem);
+  font-weight: 1000;
+  line-height: 0.78;
+  text-shadow:
+    0 5px 0 #10251f,
+    0 12px 0 rgba(255, 108, 99, 0.28),
+    0 34px 48px rgba(16, 37, 31, 0.22);
+}
+
+.heroCopy > p:not(.microcopy) {
+  max-width: 500px;
+  margin: 28px 0 0;
+  color: #18362e;
+  font-size: 1.18rem;
+  font-weight: 800;
+  line-height: 1.65;
+}
+
+.heroActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 30px;
+}
+
+.primaryAction,
+.secondaryAction {
+  display: inline-flex;
+  min-height: 50px;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid #10251f;
+  border-radius: 9px;
+  padding: 0 18px;
+  color: #10251f;
+  font: inherit;
+  font-weight: 1000;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.primaryAction {
+  background: #ffe36d;
+  box-shadow: 0 6px 0 #ff8e7f;
+}
+
+.secondaryAction {
+  background: #eaffef;
+  box-shadow: 0 6px 0 rgba(16, 37, 31, 0.14);
+}
+
+.primaryAction:hover,
+.secondaryAction:hover {
+  transform: translateY(-3px);
+}
+
+.brand:focus-visible,
+.navLinks a:focus-visible,
+.primaryAction:focus-visible,
+.secondaryAction:focus-visible,
+.moodButton:focus-visible,
+.signalRow:focus-visible,
+.textLink:focus-visible,
+.repoPanel a:focus-visible {
+  outline: 4px solid #ff6c63;
+  outline-offset: 4px;
+}
+
+.toyStage {
+  display: grid;
+  min-height: 680px;
+  place-items: center;
+}
+
+.stageGlow {
+  position: absolute;
+  width: min(620px, 94%);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(255, 227, 109, 0.72), transparent 16%),
+    radial-gradient(circle, var(--scene-glow, rgba(141, 227, 255, 0.55)), transparent 58%);
+  filter: blur(10px);
+  opacity: 0.8;
+  animation: stagePulse 4s ease-in-out infinite;
+}
+
+.buttonDeck {
+  position: absolute;
+  right: 50%;
+  bottom: 4%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  width: min(560px, 100%);
+  transform: translateX(50%);
+}
+
+.moodButton {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 3px solid #10251f;
+  border-radius: 9px;
+  background: #f5ffec;
+  color: #10251f;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+  box-shadow:
+    0 5px 0 rgba(16, 37, 31, 0.82),
+    0 18px 34px rgba(16, 37, 31, 0.16);
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.moodButton > span {
+  width: 11px;
+  height: 11px;
+  border: 3px solid #10251f;
+  border-radius: 999px;
+  background: #91e0c8;
+}
+
+.moodButton:hover,
+.moodButtonActive {
+  background: var(--scene-accent, #8de3ff);
+  transform: translateY(-4px);
+  box-shadow:
+    0 7px 0 rgba(16, 37, 31, 0.82),
+    0 24px 44px rgba(16, 37, 31, 0.2);
+}
+
+.moodButtonAwake > span {
+  background: var(--scene-accent, #8de3ff);
+}
+
+.moodButton[data-mood="touch"] > span {
+  border-radius: 4px;
+  background: #ffbe4a;
+}
+
+.moodButton[data-mood="listen"] > span {
+  background: #8de3ff;
+}
+
+.moodButton[data-mood="think"] > span {
+  border-radius: 4px;
+  background: #6b92ff;
+  transform: rotate(45deg);
+}
+
+.moodButton[data-mood="talk"] > span {
+  background: #ff6c63;
+}
+
+.moodButton[data-mood="bashful"] > span {
+  background: #c5b5ff;
+}
+
+.questStrip {
+  position: absolute;
+  bottom: 42px;
+  left: 0;
+  display: grid;
+  gap: 3px;
+  color: #10251f;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.questStrip span {
+  color: #0f6f61;
+  font-size: 0.72rem;
+}
+
+.questStrip strong {
+  font-size: 1.35rem;
+}
+
+.questStrip div {
+  display: flex;
+  gap: 6px;
+}
+
+.questStrip i {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #10251f;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.questStrip .dotLit {
+  background: #ffe36d;
+}
+
+.signalSection,
+.insideSection,
+.detailSection,
+.componentSection,
+.brainSection {
+  position: relative;
+  display: grid;
+  width: min(1180px, calc(100% - 36px));
+  margin: 0 auto;
+  scroll-margin-top: 96px;
+}
+
+.signalSection {
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.72fr);
+  gap: clamp(26px, 5vw, 70px);
+  align-items: center;
+  padding: 90px 0;
+}
+
+.signalArt {
+  position: relative;
+  min-height: 560px;
+  overflow: hidden;
+  border: 4px solid #10251f;
+  border-radius: 18px;
+  background: #91e0c8;
+  box-shadow: 14px 14px 0 rgba(16, 37, 31, 0.14);
+}
+
+.signalArt img {
+  object-fit: cover;
+}
+
+.signalCopy h2,
+.insideCopy h2,
+.brainSection h2 {
+  margin: 0;
+  color: #10251f;
+  font-size: clamp(2.5rem, 6vw, 5rem);
+  line-height: 0.9;
+}
+
+.signalCopy > p:not(.microcopy),
+.insideCopy p,
+.brainSection p {
+  margin: 22px 0 0;
+  color: rgba(17, 37, 31, 0.74);
+  font-size: 1.04rem;
+  font-weight: 750;
+  line-height: 1.7;
+}
+
+.signalList {
+  display: grid;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+.signalRow {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 0.75fr) minmax(0, 1.2fr);
+  gap: 12px;
+  align-items: center;
+  border: 0;
+  border-top: 3px solid #10251f;
+  background: transparent;
+  color: #10251f;
+  padding: 14px 0;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.signalRow span,
+.signalRow strong {
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.signalRow small {
+  color: rgba(17, 37, 31, 0.66);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.signalRowActive {
+  color: #0f6f61;
+}
+
+.detailSection,
+.componentSection {
+  gap: 30px;
+  padding: 86px 0;
+}
+
+.detailHeader {
+  max-width: 780px;
+}
+
+.detailHeader h2 {
+  margin: 0;
+  color: #10251f;
+  font-size: clamp(2.6rem, 7vw, 5.6rem);
+  line-height: 0.9;
+}
+
+.detailHeader p:not(.microcopy) {
+  margin: 20px 0 0;
+  color: rgba(17, 37, 31, 0.74);
+  font-size: 1.05rem;
+  font-weight: 750;
+  line-height: 1.7;
+}
+
+.featureGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.featureCard,
+.componentRow {
+  border: 3px solid #10251f;
+  border-radius: 12px;
+  background: rgba(255, 253, 240, 0.72);
+  color: #10251f;
+  box-shadow: 8px 8px 0 rgba(16, 37, 31, 0.14);
+}
+
+.featureCard {
+  min-height: 310px;
+  padding: 20px;
+}
+
+.featureCard > span {
+  display: inline-flex;
+  width: fit-content;
+  border: 2px solid #10251f;
+  border-radius: 7px;
+  background: #ffe36d;
+  padding: 5px 8px;
+  color: #10251f;
+  font-size: 0.66rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.featureCard h3,
+.componentRow h3 {
+  margin: 14px 0 0;
+  font-size: 1.24rem;
+}
+
+.featureCard p,
+.componentRow p {
+  margin: 12px 0 0;
+  color: rgba(17, 37, 31, 0.74);
+  font-weight: 720;
+  line-height: 1.55;
+}
+
+.featureCard dl,
+.componentSpecs {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0 0;
+}
+
+.featureCard dl {
+  border-top: 2px solid rgba(16, 37, 31, 0.16);
+  padding-top: 14px;
+}
+
+.featureCard dt,
+.componentSpecs dt {
+  color: #0f6f61;
+  font-size: 0.68rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.featureCard dd,
+.componentSpecs dd {
+  margin: 3px 0 0;
+  color: rgba(17, 37, 31, 0.78);
+  font-size: 0.9rem;
+  font-weight: 740;
+  line-height: 1.45;
+}
+
+.textLink {
+  display: inline-flex;
+  margin-top: 24px;
+  border-bottom: 3px solid #10251f;
+  color: #0f6f61;
+  font-weight: 1000;
+  text-decoration: none;
+}
+
+.componentList {
+  display: grid;
+  gap: 10px;
+}
+
+.componentRow {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.25fr) minmax(210px, 0.42fr) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+  padding: 18px 20px;
+}
+
+.componentRow span {
+  color: #0f6f61;
+  font-size: 0.78rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.componentMain h3 {
+  margin-top: 0;
+}
+
+.componentSpecs {
+  margin-top: 0;
+}
+
+.componentSpecs div {
+  border-left: 3px solid rgba(15, 111, 97, 0.28);
+  padding-left: 10px;
+}
+
+.insideSection {
+  grid-template-columns: minmax(280px, 0.5fr) minmax(0, 1fr);
+  gap: clamp(28px, 5vw, 72px);
+  align-items: center;
+  padding: 110px 0;
+}
+
+.anatomyScene {
+  position: relative;
+  overflow: hidden;
+  border: 4px solid #10251f;
+  border-radius: 18px;
+  background: #0e3431;
+  box-shadow: 14px 14px 0 rgba(16, 37, 31, 0.14);
+}
+
+.anatomyScene img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.organCallout {
+  position: absolute;
+  top: var(--organ-y);
+  left: var(--organ-x);
+  display: grid;
+  width: min(178px, 22vw);
+  gap: 2px;
+  border: 2px solid rgba(234, 255, 239, 0.46);
+  border-radius: 9px;
+  background: rgba(13, 44, 39, 0.72);
+  color: #effff3;
+  padding: 8px 9px;
+  transform: translate(-50%, -50%);
+  backdrop-filter: blur(12px);
+}
+
+.organCallout b {
+  color: #ffe36d;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+}
+
+.organCallout em {
+  font-style: normal;
+  font-weight: 1000;
+}
+
+.organCallout small {
+  color: rgba(239, 255, 243, 0.7);
+  font-size: 0.72rem;
+  line-height: 1.28;
+}
+
+.brainSection {
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 30px;
+  align-items: end;
+  padding: 100px 0 120px;
+}
+
+.repoPanel {
+  display: grid;
+  gap: 12px;
+}
+
+.repoPanel a {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid #10251f;
+  border-radius: 9px;
+  background: #fffdf0;
+  color: #10251f;
+  font-weight: 1000;
+  text-decoration: none;
+  box-shadow: 0 6px 0 rgba(16, 37, 31, 0.18);
+}
+
+.sceneTouch {
+  --scene-accent: #ffe36d;
+  --scene-glow: rgba(255, 227, 109, 0.55);
+}
+
+.sceneListen {
+  --scene-accent: #8de3ff;
+  --scene-glow: rgba(141, 227, 255, 0.58);
+}
+
+.sceneThink {
+  --scene-accent: #adffe5;
+  --scene-glow: rgba(173, 255, 229, 0.56);
+}
+
+.sceneTalk {
+  --scene-accent: #ffae9a;
+  --scene-glow: rgba(255, 174, 154, 0.56);
+}
+
+.sceneBashful {
+  --scene-accent: #c5b5ff;
+  --scene-glow: rgba(197, 181, 255, 0.56);
+}
+
+.bmoUnit {
+  --body-bg: #64cbb6;
+  --body-edge: #102f29;
+  --screen-bg: #c6e7d9;
+  --screen-edge: #1b3b33;
+  position: relative;
+  z-index: 2;
+  width: clamp(260px, 35vw, 430px);
+  filter: drop-shadow(0 30px 34px rgba(16, 37, 31, 0.28));
+  animation: bodyFloat 4.6s ease-in-out infinite;
+}
+
+.bmoAntenna {
+  position: absolute;
+  top: -20px;
+  left: 48%;
+  width: 44px;
+  height: 30px;
+  border-top: 4px solid #183b32;
+  border-left: 4px solid #183b32;
+  border-radius: 18px 0 0 0;
+  transform: rotate(-7deg);
+}
+
+.bmoAntenna::after {
+  position: absolute;
+  top: -9px;
+  right: -8px;
+  width: 12px;
+  height: 12px;
+  border: 3px solid #183b32;
+  border-radius: 50%;
+  background: #ffe36d;
+  content: "";
+}
+
+.bmoBody {
+  position: relative;
+  aspect-ratio: 0.78;
+  border: 4px solid var(--body-edge);
+  border-radius: 28px;
+  background:
+    linear-gradient(155deg, rgba(255, 255, 255, 0.36), transparent 34%),
+    var(--body-bg);
+  box-shadow:
+    inset -12px -12px 0 rgba(14, 87, 73, 0.16),
+    inset 8px 8px 0 rgba(255, 255, 255, 0.12);
+}
+
+.screen {
+  position: absolute;
+  top: 11%;
+  left: 50%;
+  width: 72%;
+  height: 48%;
+  overflow: hidden;
+  border: 4px solid var(--screen-edge);
+  border-radius: 22px;
+  background: var(--screen-bg);
+  transform: translateX(-50%);
+  box-shadow:
+    inset 0 -10px 0 rgba(73, 122, 103, 0.1),
+    0 10px 0 rgba(12, 48, 39, 0.1);
+}
+
+.screen::after {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  width: 22px;
+  height: 8px;
+  border: 2px solid rgba(18, 54, 45, 0.3);
+  border-radius: 8px;
+  background: #a9ff6e;
+  box-shadow: 0 0 14px rgba(169, 255, 110, 0.6);
+  content: "";
+}
+
+.eye {
+  --eye-x: 0px;
+  --eye-y: 0px;
+  --eye-scale-x: 1;
+  --eye-scale-y: 1;
+  --blink-scale: 1;
+  position: absolute;
+  top: 35%;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #071411;
+  transform: translate(var(--eye-x), var(--eye-y))
+    scale(var(--eye-scale-x), calc(var(--eye-scale-y) * var(--blink-scale)));
+  transform-origin: center;
+  transition:
+    transform 220ms ease,
+    width 220ms ease,
+    height 220ms ease,
+    top 220ms ease;
+  animation: rareBlink 6.8s ease-in-out infinite;
+}
+
+.leftEye {
+  left: 29%;
+}
+
+.rightEye {
+  right: 29%;
+}
+
+.mouth {
+  position: absolute;
+  top: 60%;
+  left: 50%;
+  display: block;
+  width: 44px;
+  height: 13px;
+  overflow: hidden;
+  border: 0;
+  border-bottom: 4px solid #2d4b3b;
+  border-radius: 0 0 999px 999px;
+  background: transparent;
+  transform: translateX(-50%);
+  transition:
+    width 220ms ease,
+    height 220ms ease,
+    top 220ms ease,
+    border 220ms ease,
+    background 220ms ease,
+    transform 220ms ease;
+}
+
+.mouth span {
+  position: absolute;
+  right: 7px;
+  bottom: -4px;
+  left: 7px;
+  height: 10px;
+  border-radius: 50% 50% 0 0;
+  background: #8a8b72;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.cheek {
+  position: absolute;
+  top: 54%;
+  width: 16px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 144, 113, 0.58);
+  opacity: 0;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.leftCheek {
+  left: 20%;
+}
+
+.rightCheek {
+  right: 20%;
+}
+
+.thoughtOne,
+.thoughtTwo {
+  position: absolute;
+  border: 2px solid #294a3c;
+  border-radius: 50%;
+  opacity: 0;
+}
+
+.thoughtOne {
+  top: 22%;
+  right: 18%;
+  width: 10px;
+  height: 10px;
+}
+
+.thoughtTwo {
+  top: 12%;
+  right: 9%;
+  width: 16px;
+  height: 16px;
+}
+
+.controls {
+  position: absolute;
+  right: 14%;
+  bottom: 10%;
+  left: 14%;
+  display: grid;
+  grid-template-columns: 1.1fr 0.8fr 0.8fr;
+  grid-template-rows: repeat(2, 34px);
+  gap: 12px;
+  align-items: center;
+}
+
+.dpad {
+  position: relative;
+  grid-row: 1 / 3;
+  width: 58px;
+  height: 58px;
+  align-self: center;
+}
+
+.dpad::before,
+.dpad::after {
+  position: absolute;
+  border: 3px solid #15362f;
+  border-radius: 7px;
+  background: #ffbe4a;
+  content: "";
+}
+
+.dpad::before {
+  top: 20px;
+  left: 4px;
+  width: 50px;
+  height: 18px;
+}
+
+.dpad::after {
+  top: 4px;
+  left: 20px;
+  width: 18px;
+  height: 50px;
+}
+
+.blueButton,
+.greenButton,
+.redButton {
+  display: block;
+  border: 3px solid #15362f;
+  box-shadow: inset 3px 4px 0 rgba(255, 255, 255, 0.22);
+}
+
+.blueButton {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: #6b92ff;
+  transform: rotate(45deg);
+}
+
+.greenButton {
+  width: 31px;
+  height: 31px;
+  border-radius: 50%;
+  background: #54c77b;
+}
+
+.redButton {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #ff6c63;
+}
+
+.moodTouch .screen {
+  background: #d4f1df;
+}
+
+.moodTouch .leftEye,
+.moodTouch .rightEye {
+  --eye-x: -4px;
+  --eye-y: -2px;
+  --eye-scale-x: 1.08;
+  --eye-scale-y: 1.08;
+}
+
+.moodTouch .mouth {
+  top: 59%;
+  width: 28px;
+  height: 25px;
+  border: 3px solid #1f392f;
+  border-radius: 48% 48% 52% 52%;
+  background: #2c4b3a;
+}
+
+.moodTouch .mouth span {
+  opacity: 1;
+}
+
+.moodListen .eye {
+  top: 33%;
+  width: 17px;
+  height: 17px;
+  animation:
+    rareBlink 7s ease-in-out infinite,
+    listeningGlance 2.5s ease-in-out infinite;
+}
+
+.moodListen .mouth {
+  top: 62%;
+  width: 12px;
+  height: 12px;
+  border: 3px solid #2c4b3a;
+  border-radius: 50%;
+}
+
+.moodThink .leftEye,
+.moodThink .rightEye {
+  --eye-x: 5px;
+  --eye-y: -4px;
+  --eye-scale-x: 0.92;
+  --eye-scale-y: 0.92;
+}
+
+.moodThink .mouth {
+  width: 22px;
+  transform: translateX(-50%) rotate(-4deg);
+}
+
+.moodThink .thoughtOne,
+.moodThink .thoughtTwo {
+  animation: thinkBubble 1.9s ease-in-out infinite;
+}
+
+.moodThink .thoughtTwo {
+  animation-delay: 280ms;
+}
+
+.moodTalk .mouth {
+  top: 57%;
+  width: 46px;
+  height: 28px;
+  border: 3px solid #1f392f;
+  border-radius: 46% 46% 52% 52%;
+  background: #294839;
+  animation: mouthTalk 700ms steps(3, end) infinite;
+}
+
+.moodTalk .mouth span {
+  opacity: 1;
+  animation: tongueTalk 700ms steps(3, end) infinite;
+}
+
+.moodTalk .leftEye,
+.moodTalk .rightEye {
+  --eye-scale-x: 0.96;
+  --eye-scale-y: 0.96;
+}
+
+.moodBashful .leftEye {
+  --eye-x: 3px;
+  --eye-y: 2px;
+  --eye-scale-x: 0.74;
+  --eye-scale-y: 0.5;
+}
+
+.moodBashful .rightEye {
+  --eye-x: -3px;
+  --eye-y: 2px;
+  --eye-scale-x: 0.74;
+  --eye-scale-y: 0.5;
+}
+
+.moodBashful .mouth {
+  width: 34px;
+  transform: translateX(-50%) rotate(2deg);
+}
+
+.moodBashful .cheek {
+  opacity: 1;
+  transform: translateY(2px);
+}
+
+@keyframes bodyFloat {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-1deg);
+  }
+
+  50% {
+    transform: translateY(-10px) rotate(1deg);
+  }
+}
+
+@keyframes stagePulse {
+  0%,
+  100% {
+    transform: scale(0.96);
+  }
+
+  50% {
+    transform: scale(1.03);
+  }
+}
+
+@keyframes rareBlink {
+  0%,
+  88%,
+  92%,
+  100% {
+    --blink-scale: 1;
+  }
+
+  90% {
+    --blink-scale: 0.12;
+  }
+}
+
+@keyframes listeningGlance {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+
+  38% {
+    translate: -3px 0;
+  }
+
+  68% {
+    translate: 3px 0;
+  }
+}
+
+@keyframes thinkBubble {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translateY(5px) scale(0.78);
+  }
+
+  42%,
+  72% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes mouthTalk {
+  0%,
+  100% {
+    height: 14px;
+    width: 34px;
+  }
+
+  45% {
+    height: 29px;
+    width: 46px;
+  }
+
+  72% {
+    height: 21px;
+    width: 28px;
+  }
+}
+
+@keyframes tongueTalk {
+  0%,
+  100% {
+    transform: translateY(4px);
+  }
+
+  45% {
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 980px) {
+  .hero,
+  .signalSection,
+  .insideSection,
+  .brainSection,
+  .componentRow {
+    grid-template-columns: 1fr;
+  }
+
+  .featureGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .componentRow {
+    gap: 10px;
+  }
+
+  .componentSpecs {
+    margin-top: 8px;
+  }
+
+  .toyStage {
+    min-height: 540px;
+  }
+
+  .signalArt {
+    min-height: 420px;
+  }
+
+  .organCallout {
+    position: static;
+    width: auto;
+    transform: none;
+  }
+
+  .anatomyScene {
+    display: grid;
+    gap: 8px;
+    padding-bottom: 10px;
+  }
+}
+
+@media (max-width: 620px) {
+  .topbar {
+    flex-wrap: wrap;
+    gap: 12px 18px;
+    border-radius: 16px;
+    padding: 10px 12px;
+  }
+
+  .navLinks {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .hero {
+    width: min(100% - 28px, 420px);
+    padding-top: 130px;
+  }
+
+  .heroCopy h1 {
+    font-size: 4.35rem;
+  }
+
+  .heroCopy > p:not(.microcopy) {
+    font-size: 1rem;
+  }
+
+  .primaryAction,
+  .secondaryAction {
+    flex: 1 1 150px;
+  }
+
+  .toyStage {
+    min-height: 390px;
+  }
+
+  .bmoUnit {
+    width: min(64vw, 210px);
+  }
+
+  .buttonDeck {
+    bottom: 20px;
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
+
+  .moodButton {
+    min-width: 62px;
+    min-height: 42px;
+    gap: 4px;
+    padding: 0 6px;
+    font-size: 0.58rem;
+  }
+
+  .moodButton > span {
+    width: 8px;
+    height: 8px;
+    border-width: 2px;
+  }
+
+  .questStrip {
+    position: static;
+    margin-top: 16px;
+  }
+
+  .signalSection,
+  .insideSection,
+  .detailSection,
+  .componentSection,
+  .brainSection {
+    width: min(100% - 28px, 420px);
+    padding: 70px 0;
+    scroll-margin-top: 126px;
+  }
+
+  .signalCopy h2,
+  .insideCopy h2,
+  .detailHeader h2,
+  .brainSection h2 {
+    font-size: 2.65rem;
+  }
+
+  .featureGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .featureCard {
+    min-height: 0;
+  }
+
+  .signalRow {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .signalRow small {
+    grid-column: 2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bmoUnit,
+  .stageGlow,
+  .eye,
+  .thoughtOne,
+  .thoughtTwo,
+  .mouth {
+    animation: none;
+    transition: none;
+  }
+}

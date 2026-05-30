@@ -1,7 +1,19 @@
 import { headers } from 'next/headers';
+import type { Metadata } from 'next';
 
 import MobileTopBar from '@/components/MobileTopBar';
 import Sidebar from '@/components/Sidebar';
+
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false,
+    googleBot: {
+      index: false,
+      follow: false,
+    },
+  },
+};
 
 /**
  * Admin shell layout.

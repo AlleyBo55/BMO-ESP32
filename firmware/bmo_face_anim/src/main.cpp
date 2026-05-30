@@ -14,11 +14,13 @@
 #include <SPI.h>
 #include <math.h>
 #include <driver/i2s.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/semphr.h>
 #include "audio_clips.h"
 #include "bmo_brain_client.h"
 #include "bmo_mic.h"
 #include "bmo_provisioning.h"
-#include "bmo_wav.h"
 
 // -----------------------------------------------------------------------------
 // Pin map
@@ -43,6 +45,8 @@ extern volatile bool      g_touchPending;
 extern volatile TouchKind g_pendingKind;
 static void pollTouch();
 static void askBrain();
+static void renderBrainStatusFrame(uint32_t now);
+static const char *touchKindName(TouchKind k);
 
 // -----------------------------------------------------------------------------
 // Panel geometry
@@ -121,6 +125,21 @@ static void tftInit() {
 // Back-buffer
 // -----------------------------------------------------------------------------
 static uint16_t fb[TFT_W * TFT_H];
+
+// -----------------------------------------------------------------------------
+// Background face animation
+//
+// The brain flow blocks the main thread for several seconds inside
+// HTTPClient::POST() with no foreground hook to redraw — which is why the
+// Thinking face used to freeze on a single frame. This dedicated render task
+// keeps the listening / thinking / talking face animating while the main
+// thread is parked on the network. It only draws while g_brainFaceActive is
+// true (the request window); the rest of the time the main loop owns the
+// screen. g_faceMutex serializes all framebuffer + SPI access between the two.
+// -----------------------------------------------------------------------------
+static SemaphoreHandle_t g_faceMutex       = nullptr;  // guards fb + SPI
+static volatile bool     g_brainFaceActive = false;    // task renders while true
+static TaskHandle_t      g_faceTaskHandle  = nullptr;
 
 static inline void putPx(int x, int y, uint16_t c) {
   if ((unsigned)x >= (unsigned)TFT_W || (unsigned)y >= (unsigned)TFT_H) return;
@@ -428,20 +447,74 @@ static void fbDrawZ(int cx, int cy, int size, uint16_t c) {
   fbLine(cx + size, cy - size, cx - size, cy + size, 2, c);
 }
 
-// Sunglasses bar across both eyes.
+// Pit Viper-style shield visor: one oversized wraparound mirror lens across
+// both eyes (no bridge gap), a chunky top rim, swept-back temple arms, stacked
+// blue/cyan/teal bands, and the tiny center nose notch visible in the reference.
 static void fbDrawShades(int leftCx, int rightCx, int cy) {
-  int half = (rightCx - leftCx) / 2;
-  int left = leftCx - 12;
-  int right = rightCx + 12;
-  // bridge
-  fbHLine(leftCx + 8, cy, rightCx - leftCx - 16, C_INK);
-  // lenses
-  fbFillRoundRect(left,  cy - 6, 24, 12, 5, C_INK);
-  fbFillRoundRect(rightCx - 12, cy - 6, 24, 12, 5, C_INK);
-  // shine on lens
-  fbFillRoundRect(left + 4, cy - 4, 5, 2, 1, C_SHINE);
-  fbFillRoundRect(rightCx - 8, cy - 4, 5, 2, 1, C_SHINE);
-  (void)half; (void)right;
+  // Mirror-lens palette (RGB565), tuned for a tiny ST7735 screen.
+  const uint16_t C_FRAME     = 0x0000;  // black frame / brow
+  const uint16_t C_RIM       = 0xF345;  // warm coral top rim like sport frames
+  const uint16_t C_LENS_SKY  = 0x9FFF;  // pale sky-blue highlight
+  const uint16_t C_LENS_AQUA = 0x07FF;  // bright aqua mirror
+  const uint16_t C_LENS_TEAL = 0x0596;  // saturated teal
+  const uint16_t C_LENS_NAVY = 0x01AA;  // deep blue lower reflection
+  const uint16_t C_STREAK    = 0xFFFF;  // white mirror glare
+
+  // Wide shield lens spanning almost the whole face, like the photo reference.
+  const int x0  = leftCx  - 26;
+  const int x1  = rightCx + 26;
+  const int w   = x1 - x0;
+  const int top = cy - 14;
+  const int h   = 28;
+  const int noseX = (leftCx + rightCx) / 2;
+
+  // Thick swept-back side arms, visible outside the lens like real Vipers.
+  // upper swept-back arms
+  fbLine(x0 + 5, top + 5, x0 - 10, top + 9, 4, C_FRAME);
+  fbLine(x1 - 5, top + 5, x1 + 10, top + 9, 4, C_FRAME);
+  // lower swept-back arms
+  fbLine(x0 + 3, top + h - 8, x0 - 8, top + h - 2, 3, C_FRAME);
+  fbLine(x1 - 3, top + h - 8, x1 + 8, top + h - 2, 3, C_FRAME);
+
+  // Black outline with tapered top/bottom corners, drawn as scanlines so the
+  // visor reads less like a simple rounded rectangle on the low-res panel.
+  for (int y = -2; y < h + 2; ++y) {
+    int sideInset = 0;
+    if (y < 4) sideInset = 4 - y;
+    if (y > h - 6) sideInset = y - (h - 6);
+    if (sideInset < 0) sideInset = 0;
+    fbHLine(x0 - 2 + sideInset, top + y, w + 4 - sideInset * 2, C_FRAME);
+  }
+
+  // Mirrored shield body: broad stacked bands mimic the blue/cyan visor in the
+  // attached Viper photo while keeping the whole lens continuous across BMO's eyes.
+  for (int y = 0; y < h; ++y) {
+    int sideInset = 0;
+    if (y < 4) sideInset = 4 - y;
+    if (y > h - 6) sideInset = y - (h - 6);
+
+    uint16_t c = C_LENS_NAVY;
+    if (y < 5) {
+      c = C_LENS_SKY;
+    } else if (y < 12) {
+      c = C_LENS_AQUA;
+    } else if (y < 21) {
+      c = C_LENS_TEAL;
+    }
+    fbHLine(x0 + sideInset, top + y, w - sideInset * 2, c);
+  }
+
+  // Chunky brow/rim along the top edge, with a warm frame glint like the photo.
+  fbFillRoundRect(x0 + 4, top - 2, w - 8, 5, 2, C_FRAME);
+  fbHLine(x0 + 8, top - 1, w - 16, C_RIM);
+
+  // center nose notch: a small dark dip at the lower middle of the visor.
+  fbFillRoundRect(noseX - 5, top + h - 3, 10, 6, 2, C_FRAME);
+
+  // Diagonal mirror glare streaks, lower-left to upper-right.
+  fbLine(x0 + 15, top + h - 4, x0 + 34, top + 3, 2, C_STREAK);
+  fbLine(x0 + 29, top + h - 5, x0 + 46, top + 4, 1, C_STREAK);
+  fbLine(x1 - 35, top + 4, x1 - 18, top + h - 7, 1, C_STREAK);
 }
 
 // Zigzag mouth (wavy unhappy / sick line).
@@ -457,6 +530,32 @@ static void fbDrawZigzag(int cx, int cy, int width, int amp, int thickness,
     if (x > -half) fbLine(prevX, prevY, cx + x, y, thickness, c);
     prevX = cx + x; prevY = y;
   }
+}
+
+// Pulsing "processing" orb where the mouth is — concentric rings that breathe
+// in/out. Used for the Thinking face so it reads as "computing" rather than a
+// frozen flat line. `phase` is a free-running 0..1 ramp.
+static void fbDrawPulseMouth(int cx, int cy, float phase, uint32_t now) {
+  // Breathing radius via a sine on the phase.
+  float b = 0.5f + 0.5f * sinf(phase * 6.28318f);
+  int rOuter = 6 + (int)(7 * b);
+  // Outer soft ring.
+  fbFillCircle(cx, cy, rOuter, C_MOUTH);
+  // Punch out the centre to leave a ring, leaving a small solid core.
+  uint16_t bg = g_frameBg;
+  int rInner = rOuter - 3;
+  if (rInner > 2) fbFillCircle(cx, cy, rInner, bg);
+  // Pulsing core dot.
+  int rCore = 2 + (int)(2 * (1.0f - b));
+  fbFillCircle(cx, cy, rCore, C_MOUTH);
+  // A couple of orbiting specks for a techy feel.
+  for (int i = 0; i < 2; ++i) {
+    float a = phase * 6.28318f * (i ? -1.0f : 1.0f) + i * 3.14159f;
+    int ox = cx + (int)(cosf(a) * (rOuter + 4));
+    int oy = cy + (int)(sinf(a) * (rOuter + 4));
+    fbFillCircle(ox, oy, 1, C_MOUTH);
+  }
+  (void)now;
 }
 
 // Teeth chatter: alternating short vertical stripes inside a flat mouth box.
@@ -487,6 +586,43 @@ static void fbDrawLaugh(int cx, int cy, float openness, uint32_t now) {
 // -----------------------------------------------------------------------------
 // Frame flush
 // -----------------------------------------------------------------------------
+
+// Datamosh-style glitch post-process. Runs over the finished framebuffer just
+// before flush: picks a few horizontal bands and shoves each sideways by a
+// pseudo-random amount, with an occasional cyan/magenta RGB-split tint so it
+// reads like a corrupted video signal. `intensity` scales band count + shift.
+// Cheap: only touches a handful of rows per frame.
+static void fbApplyGlitch(uint8_t intensity, uint32_t now) {
+  if (intensity == 0) return;
+  static uint16_t lineBuf[TFT_W];
+  const int bands = 2 + intensity;            // a few bands
+  for (int b = 0; b < bands; ++b) {
+    // Pseudo-random band position/height/shift seeded off time + index.
+    uint32_t r = now * 2654435761u + (uint32_t)(b * 40503);
+    int y0 = (int)(r % TFT_H);
+    int h  = 2 + (int)((r >> 8) % 6);
+    int shift = (int)((r >> 16) % (uint32_t)(3 + intensity * 3)) - (1 + intensity);
+    if (shift == 0) shift = (b & 1) ? 2 : -2;
+    bool tint = ((r >> 24) & 3) == 0;          // ~25% of bands get RGB split
+    uint16_t tintMask = (b & 1) ? 0x07FF : 0xF81F;  // cyan / magenta
+    for (int dy = 0; dy < h; ++dy) {
+      int y = y0 + dy;
+      if (y < 0 || y >= TFT_H) continue;
+      uint16_t* row = fb + y * TFT_W;
+      // Copy row, then write back shifted (wrap-around).
+      for (int x = 0; x < TFT_W; ++x) lineBuf[x] = row[x];
+      for (int x = 0; x < TFT_W; ++x) {
+        int src = x - shift;
+        if (src < 0) src += TFT_W;
+        else if (src >= TFT_W) src -= TFT_W;
+        uint16_t px = lineBuf[src];
+        if (tint) px |= tintMask;              // additive-ish channel smear
+        row[x] = px;
+      }
+    }
+  }
+}
+
 static void flushFrame() {
   tftSPI.beginTransaction(SPISettings(SPI_HZ, MSBFIRST, SPI_MODE0));
 
@@ -579,6 +715,15 @@ struct FaceState {
   bool snowFlakes = false;         // cold
   bool steamLines = false;         // hot
   bool zzzLetters = false;         // bored / sleepy
+
+  // Thinking "processing orb": a pulsing ring/dot where the mouth is, sized by
+  // pulsePhase (0 = use time-based default). Set pulseMouth to enable.
+  bool  pulseMouth = false;
+
+  // Datamosh-style glitch: horizontal bands of the rendered face get shoved
+  // sideways + RGB-split. 0 = off; higher = more/stronger bands. Applied as a
+  // post-process over the whole framebuffer (see fbApplyGlitch).
+  uint8_t glitchShift = 0;
 
   // Whole-face shake
   int shakeX = 0;
@@ -704,6 +849,11 @@ static void drawFaceToBuffer(const FaceState &s, uint32_t now) {
   }
 
   // Mouth
+  if (s.pulseMouth) {
+    // Thinking "processing orb" replaces the normal mouth entirely.
+    float phase = (now % 1200) / 1200.0f;
+    fbDrawPulseMouth(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, phase, now);
+  } else {
   switch (s.mouth) {
     case FaceState::M_SMILE:
       fbDrawSmile(MOUTH_CX + s.shakeX, MOUTH_Y - 4 + s.shakeY, s.smileWidth, s.smileDip, 3, 2, C_MOUTH);
@@ -761,6 +911,7 @@ static void drawFaceToBuffer(const FaceState &s, uint32_t now) {
     case FaceState::M_LAUGH:
       fbDrawLaugh(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, s.mouthOpen, now);
       break;
+  }
   }
 
   // Tear (sad)
@@ -837,6 +988,12 @@ static void drawFaceToBuffer(const FaceState &s, uint32_t now) {
     }
   }
 
+  // Datamosh row-shift glitch — applied LAST so it displaces the finished
+  // face (eyes, mouth, overlays) rather than getting drawn over.
+  if (s.glitchShift > 0) {
+    fbApplyGlitch(s.glitchShift, now);
+  }
+
 }
 
 static void renderFrame(const FaceState &s, uint32_t now) {
@@ -877,7 +1034,7 @@ static constexpr i2s_port_t AUDIO_I2S_PORT = I2S_NUM_0;
 // Global volume, 0.0 (mute) .. 1.0 (max). Live-tunable via setVolume().
 // A future web UI can call setVolume() over WiFi / serial to adjust live.
 // Keep the default modest because the MAX98357A's GAIN pin is at 9 dB.
-static volatile float g_volume = 0.234f;  // bumped +30% from 0.18
+static volatile float g_volume = 0.328f;  // bumped +40% from 0.234
 
 static inline void setVolume(float v) {
   if (v < 0.0f) v = 0.0f;
@@ -934,12 +1091,65 @@ extern "C" void bmo_set_volume_from_dashboard(int volume0to100) {
   Serial.printf("[audio] volume set to %d%%\n", volume0to100);
 }
 
+// Persistent stream state for bmo_audio_push_pcm16. These carry partial
+// state ACROSS chunks within a single reply: `leftoverByte`/`hasLeftover`
+// stitch a 16-bit sample split across a chunk boundary, and `skipPhase`
+// tracks the 3:2 downsample position.
+//
+// CRITICAL: they must be reset between replies. If a reply's total byte count
+// is odd, hasLeftover stays true with one orphan byte; the NEXT reply would
+// then stitch that stale byte onto its first byte, shifting every subsequent
+// 16-bit sample's high/low byte boundary for the entire stream → pure noise.
+// That's the "works once, then noise on the next try" bug. bmo_audio_reset_
+// stream() clears them and is called at the start of every reply.
+static uint8_t s_pcmLeftoverByte = 0;
+static bool    s_pcmHasLeftover  = false;
+static uint8_t s_pcmSkipPhase    = 0;  // 0,1,2 — skip when phase == 2.
+
+// Live talking-loudness envelope, 0.0..1.0, updated as reply/clip audio is
+// pushed to I2S. The talking face reads this so the mouth moves with the
+// ACTUAL voice (real lip-sync) instead of a canned sine wiggle. Written from
+// the audio path, read from the render task — a float read/write is atomic
+// enough on the C3 for a smoothed visual envelope, so no lock needed.
+static volatile float g_talkLevel = 0.0f;
+
+// Feed a block of post-volume PCM16 samples into the envelope follower. Uses a
+// fast-attack / slow-release peak tracker so the mouth snaps open on syllables
+// and eases shut between them — reads as speech, not a buzz.
+static inline void talkEnvelopeFeed(const int16_t* samples, size_t n) {
+  if (samples == nullptr || n == 0) return;
+  // Cheap peak over the block.
+  int32_t peak = 0;
+  for (size_t k = 0; k < n; ++k) {
+    int32_t a = samples[k];
+    if (a < 0) a = -a;
+    if (a > peak) peak = a;
+  }
+  float target = (float)peak / 32767.0f;
+  // Normalize: speech rarely hits full-scale post-volume, so lift it a bit and
+  // clamp. This keeps the mouth lively at normal listening levels.
+  target *= 2.2f;
+  if (target > 1.0f) target = 1.0f;
+  float cur = g_talkLevel;
+  // Fast attack, slow release.
+  if (target > cur) cur += (target - cur) * 0.6f;
+  else              cur += (target - cur) * 0.15f;
+  g_talkLevel = cur;
+}
+
+extern "C" void bmo_audio_reset_stream() {
+  s_pcmLeftoverByte = 0;
+  s_pcmHasLeftover  = false;
+  s_pcmSkipPhase    = 0;
+  g_talkLevel       = 0.0f;
+}
+
 extern "C" void bmo_audio_push_pcm16(const uint8_t* data, size_t len) {
   if (data == nullptr || len < 2) return;
   // 24 → 16 kHz downsample by dropping 1 of every 3 input samples.
-  static uint8_t leftoverByte = 0;
-  static bool hasLeftover = false;
-  static uint8_t skipPhase = 0;  // 0,1,2 — skip when phase == 2.
+  uint8_t& leftoverByte = s_pcmLeftoverByte;
+  bool&    hasLeftover  = s_pcmHasLeftover;
+  uint8_t& skipPhase    = s_pcmSkipPhase;
 
   // Stitch a leading half-sample from the previous chunk if present.
   size_t i = 0;
@@ -953,6 +1163,7 @@ extern "C" void bmo_audio_push_pcm16(const uint8_t* data, size_t len) {
       if (f >  1.0f) f =  1.0f;
       else if (f < -1.0f) f = -1.0f;
       int16_t out = static_cast<int16_t>(f * 32767.0f);
+      talkEnvelopeFeed(&out, 1);
       size_t written = 0;
       i2s_write(AUDIO_I2S_PORT, &out, sizeof(out), &written, portMAX_DELAY);
     }
@@ -981,6 +1192,7 @@ extern "C" void bmo_audio_push_pcm16(const uint8_t* data, size_t len) {
     batch[batchN++] = static_cast<int16_t>(f * 32767.0f);
 
     if (batchN == sizeof(batch) / sizeof(batch[0])) {
+      talkEnvelopeFeed(batch, batchN);
       size_t written = 0;
       i2s_write(AUDIO_I2S_PORT, batch, batchN * sizeof(int16_t), &written,
                 portMAX_DELAY);
@@ -989,6 +1201,7 @@ extern "C" void bmo_audio_push_pcm16(const uint8_t* data, size_t len) {
   }
 
   if (batchN > 0) {
+    talkEnvelopeFeed(batch, batchN);
     size_t written = 0;
     i2s_write(AUDIO_I2S_PORT, batch, batchN * sizeof(int16_t), &written,
               portMAX_DELAY);
@@ -1124,10 +1337,75 @@ static void playClip(const BmoClip *clip) {
       produced++;
     }
     if (n == 0) break;
+    talkEnvelopeFeed(chunk, n);   // keep the lip-sync envelope live for clips too
     size_t written;
     i2s_write(AUDIO_I2S_PORT, chunk, n * sizeof(int16_t), &written,
               portMAX_DELAY);
   }
+  g_talkLevel = 0.0f;   // mouth closes when the clip ends
+}
+
+// Lip-synced clip playback: like playClip, but renders a BMO "talking" face
+// between audio chunks so the mouth moves with the clip's actual loudness.
+// Used for the touch greetings so BMO visibly *says* "hai!" rather than
+// playing a voice over a static face. Blocks until the clip finishes.
+static void playClipLipSync(const BmoClip *clip) {
+  if (!clip || clip->sample_count == 0 || clip->rate != AUDIO_RATE) return;
+
+  static int16_t chunk[256];
+  int16_t predictor = clip->predictor;
+  uint8_t stepIndex = clip->step_index;
+  uint32_t produced = 0;
+  uint32_t encodedIndex = 0;
+  bool highNibble = false;
+  uint8_t frameSkip = 0;
+
+  while (produced < clip->sample_count) {
+    uint32_t n = 0;
+    while (n < 256 && produced < clip->sample_count) {
+      int16_t sample;
+      if (produced == 0) {
+        sample = predictor;
+      } else {
+        if (encodedIndex >= clip->length) break;
+        uint8_t packed = clip->samples[encodedIndex];
+        uint8_t code = highNibble ? (packed >> 4) : (packed & 0x0F);
+        if (highNibble) encodedIndex++;
+        highNibble = !highNibble;
+        sample = decodeImaNibble(code, predictor, stepIndex);
+      }
+      float f = ((float)sample / 32768.0f) * g_volume;
+      if (f > 1.0f) f = 1.0f;
+      else if (f < -1.0f) f = -1.0f;
+      chunk[n++] = (int16_t)(f * 32767.0f);
+      produced++;
+    }
+    if (n == 0) break;
+    talkEnvelopeFeed(chunk, n);
+
+    // Render a talking frame roughly every other chunk (~32ms) so we keep the
+    // I2S buffer fed without starving it on slow draws.
+    if ((frameSkip++ & 1) == 0) {
+      const uint32_t now = millis();
+      float lvl = g_talkLevel;
+      FaceState s;
+      s.eyeShape  = FaceState::EYE_NORMAL;
+      s.mouth     = FaceState::M_OPEN;
+      s.mouthOpen = 0.08f + 0.9f * lvl;
+      if (s.mouthOpen > 1.0f) s.mouthOpen = 1.0f;
+      const uint32_t blinkPhase = now % 2600;
+      s.lidL = s.lidR = (blinkPhase < 130) ? 0.8f : 0.1f;
+      s.pupilDy = -(int)(2.0f * lvl);
+      s.blush = 0.25f;   // warm, friendly greeting
+      drawFaceToBuffer(s, now);
+      flushFrame();
+    }
+
+    size_t written;
+    i2s_write(AUDIO_I2S_PORT, chunk, n * sizeof(int16_t), &written,
+              portMAX_DELAY);
+  }
+  g_talkLevel = 0.0f;
 }
 
 // Lookup by clip name (e.g. "bmo_hi_friend"). Returns NULL if not found.
@@ -1145,6 +1423,49 @@ static void playClipOrSynth(const char *name, void (*synthFallback)()) {
   const BmoClip *c = findClip(name);
   if (c) playClip(c);
   else if (synthFallback) synthFallback();
+}
+
+// Generic greeting voices played on a normal (non-talk) touch. We rotate
+// through whichever of these clips are actually baked into the voice pack so
+// BMO doesn't say the exact same thing every single time you poke it — it
+// feels alive rather than canned. Names that aren't present are skipped, and
+// if NONE of them are baked we fall back to the caller-supplied synth voice.
+//
+// These live in flash as baked ADPCM clips (src/audio_clips.h), same as the
+// existing voices — see the note at the bottom of this function for the
+// storage rationale. Add WAVs named like these to audio/ and re-bake.
+static void playGreeting(void (*synthFallback)()) {
+  static const char *const kGreetingClips[] = {
+    "bmo_hi_friend",
+    "bmo_hello",
+    "bmo_hey",
+    "bmo_oh_hi",
+    "bmo_hi_there",
+  };
+  constexpr int kCount = sizeof(kGreetingClips) / sizeof(kGreetingClips[0]);
+
+  // Collect the ones that are actually baked in this build.
+  const BmoClip *present[kCount];
+  int n = 0;
+  for (int i = 0; i < kCount; ++i) {
+    const BmoClip *c = findClip(kGreetingClips[i]);
+    if (c) present[n++] = c;
+  }
+
+  if (n == 0) {
+    // No greeting clips baked → behave exactly like before.
+    if (synthFallback) synthFallback();
+    return;
+  }
+
+  // Rotate so consecutive touches don't repeat the same greeting. Seeded off
+  // millis() the first time for a little variety across power cycles.
+  static int idx = -1;
+  if (idx < 0) idx = (int)(millis() % n);
+  else idx = (idx + 1) % n;
+  // Lip-sync the greeting so BMO visibly says it (mouth moves with the voice)
+  // rather than playing audio over a frozen face.
+  playClipLipSync(present[idx]);
 }
 
 
@@ -1731,34 +2052,155 @@ static int recentPressesWithin(uint32_t windowMs) {
 }
 
 // Poll the touch sensor and classify. Call frequently (every ~10ms is fine).
+//
+// Gesture model (walkie-talkie / push-to-talk):
+//   - tap  (<250ms)                : poke  (3+ rapid taps = tickle)
+//   - brief hold (250ms..kTalkHoldMs): canned "pet" HOLD reaction
+//   - hold >= kTalkHoldMs          : PUSH-TO-TALK. Fires *while still held*
+//       so askBrain() records for as long as the user keeps holding and
+//       sends the moment they release. The listening face shows the entire
+//       time, so the user always knows BMO is hearing them.
+static constexpr uint32_t kTalkHoldMs = 500;
+
+// True while the capacitive button is being touched. Used as the
+// "keep recording" predicate for push-to-talk.
+//
+// DEBOUNCED. The raw line can glitch — electrical noise on the wire, or the
+// pin briefly flickering — and pollTouch() has no other filtering, so a single
+// glitch becomes a phantom press→release pair = a phantom poke/reaction. Left
+// unfiltered this shows up as BMO reacting "non-stop like it's being touched."
+// We only accept a new level once the raw reading has held steady for
+// kDebounceMs, which kills the fast glitches while staying responsive.
+static constexpr uint32_t kDebounceMs = 40;
+
+static bool touchRaw() { return digitalRead(PIN_TOUCH) == HIGH; }
+
+static bool touchIsDown() {
+  static bool stable = false;      // last accepted (debounced) level
+  static bool lastRaw = false;     // previous raw sample
+  static uint32_t lastChange = 0;  // when the raw sample last changed
+  bool raw = touchRaw();
+  if (raw != lastRaw) {
+    lastRaw = raw;
+    lastChange = millis();
+  } else if (raw != stable && (millis() - lastChange) >= kDebounceMs) {
+    stable = raw;
+  }
+  return stable;
+}
+
 static void pollTouch() {
   static bool wasDown = false;
   static uint32_t pressStart = 0;
-  bool isDown = digitalRead(PIN_TOUCH) == HIGH;
+  static bool consumed = false;  // this press already fired the talk gesture
+  bool isDown = touchIsDown();
 
   if (isDown && !wasDown) {
     // press began
     pressStart = millis();
+    consumed = false;
     s_recentPressMs[s_pressIdx % 8] = pressStart;
     s_pressIdx++;
-  } else if (!isDown && wasDown) {
-    // release: classify by hold duration + recent press count
-    uint32_t held = millis() - pressStart;
-    int taps = recentPressesWithin(900);
-    TouchKind kind;
-    if (taps >= 3 && held < 250) {
-      kind = TOUCH_TICKLE;
-    } else if (held < 250) {
-      kind = TOUCH_QUICK_POKE;
-    } else if (held < 1500) {
-      kind = TOUCH_HOLD;
-    } else {
-      kind = TOUCH_LONG_HOLD;
+  } else if (isDown && wasDown) {
+    // still holding — once we cross the talk threshold, fire LONG_HOLD
+    // IMMEDIATELY (while the finger is still down) so the recording in
+    // askBrain() runs for the duration of the hold, walkie-talkie style.
+    if (!consumed && (millis() - pressStart) >= kTalkHoldMs) {
+      consumed = true;
+      g_pendingKind = TOUCH_LONG_HOLD;
+      g_touchPending = true;
     }
-    g_pendingKind = kind;
-    g_touchPending = true;
+  } else if (!isDown && wasDown) {
+    // release. If the talk gesture already fired mid-hold, do nothing here
+    // (the press is consumed). Otherwise classify the short gestures — AND,
+    // crucially, treat a sustained hold as PUSH-TO-TALK here too. The mid-hold
+    // branch above is the *fast* path (fires while the finger is still down),
+    // but it depends on pollTouch() being sampled steadily across the
+    // kTalkHoldMs mark with a perfectly stable line. The TTP223 line can
+    // flicker enough to miss that, so without this release fallback a long
+    // physical hold collapses to a "pet" and the brain/STT path never runs.
+    if (!consumed) {
+      uint32_t held = millis() - pressStart;
+      int taps = recentPressesWithin(900);
+      TouchKind kind;
+      if (held >= kTalkHoldMs) {
+        kind = TOUCH_LONG_HOLD;   // sustained hold → push-to-talk (brain)
+      } else if (taps >= 3 && held < 250) {
+        kind = TOUCH_TICKLE;
+      } else if (held < 250) {
+        kind = TOUCH_QUICK_POKE;
+      } else {
+        kind = TOUCH_HOLD;  // 250ms .. kTalkHoldMs: brief "pet"
+      }
+      Serial.printf("[touch] release held=%lums -> %s\n",
+                    static_cast<unsigned long>(held), touchKindName(kind));
+      g_pendingKind = kind;
+      g_touchPending = true;
+    }
   }
   wasDown = isDown;
+}
+
+// Set true when a touch interrupts BMO mid-reply, so askBrain() can play a
+// graceful "okay!" acknowledgement instead of letting the reply run out.
+static volatile bool g_talkInterrupted = false;
+
+// ---- Idle "random thought" gating ------------------------------------------
+// Instead of a wall-clock timer (which would burn OpenRouter credit all day
+// and risk BMO talking to an empty room at 2am), BMO only muses a spontaneous
+// thought after the child has played with it a few times. We count playful
+// touches here; when the count hits kTouchesPerThought, BMO thinks aloud once
+// and the counter resets. No touches (BMO sitting in a drawer, or night-time)
+// => no thoughts => zero cost and silence in quiet hours. The count lives in
+// RAM only; a reboot harmlessly restarts the accumulation.
+static constexpr uint32_t kTouchesPerThought = 5;
+static uint32_t g_playfulTouchCount = 0;
+// Set by countTouchForThought() when the threshold is reached; consumed by the
+// loop once the current touch reaction has fully finished, so the musing plays
+// cleanly after BMO reacts rather than interrupting the reaction.
+static bool g_thoughtDue = false;
+
+// Counts a finished touch toward the idle-thought threshold. LONG_HOLD is
+// push-to-talk — that already starts a full conversation, so it doesn't count
+// as an idle "play" touch. Every other touch (poke, tickle, pet) does. When
+// the count reaches kTouchesPerThought we arm g_thoughtDue and reset, so the
+// next quiet moment gets one spontaneous thought.
+static void countTouchForThought(TouchKind k) {
+  if (k == TOUCH_LONG_HOLD || k == TOUCH_NONE) return;
+  g_playfulTouchCount++;
+  Serial.printf("[brain] playful touch %lu/%lu toward idle thought\n",
+                static_cast<unsigned long>(g_playfulTouchCount),
+                static_cast<unsigned long>(kTouchesPerThought));
+  if (g_playfulTouchCount >= kTouchesPerThought) {
+    g_playfulTouchCount = 0;
+    g_thoughtDue = true;
+  }
+}
+
+// Predicate handed to the brain client: returns false (stop talking) the
+// instant a fresh touch is detected during playback. We consume that touch
+// here (clear the pending flags) so it interrupts cleanly without ALSO
+// triggering a poke/hold reaction right afterwards — BMO just stops, like a
+// person who hears "okay, stop" and pauses.
+static bool brainShouldKeepTalking() {
+  pollTouch();
+  if (g_touchPending) {
+    g_touchPending = false;
+    g_pendingKind  = TOUCH_NONE;
+    g_talkInterrupted = true;
+    return false;
+  }
+  // The brain client calls this between every audio chunk while streaming the
+  // reply. We render the talking face HERE (cooperatively, on the main thread)
+  // rather than from faceRenderTask — on the single-core C3 a background SPI
+  // flush during streaming starves the TLS read loop and truncates the reply.
+  // Rendering between chunks keeps the stream fed. Mutex-guarded so we never
+  // draw at the same time as the background task during the phase handoff.
+  if (g_faceMutex && xSemaphoreTake(g_faceMutex, 0) == pdTRUE) {
+    renderBrainStatusFrame(millis());
+    xSemaphoreGive(g_faceMutex);
+  }
+  return true;
 }
 
 static const char *touchKindName(TouchKind k) {
@@ -1898,20 +2340,20 @@ static void playReactionGlance(TouchKind k) {
 }
 
 // -----------------------------------------------------------------------------
-// Brain glue — long-hold gesture captures audio and asks the dashboard.
+// Brain glue — push-to-talk: hold to record, release to send.
 //
 // Flow:
-//   1. We've already played `playReactionGlance(TOUCH_LONG_HOLD)` and are now
-//      animating a "listening" face while we capture from the mic. The user
-//      just *stopped* holding (that's how the gesture is detected), so we
-//      give them ~3 s of speech room; capture continues until either the
-//      buffer fills or the timeout hits.
-//   2. Wrap the captured PCM16 in a RIFF/WAVE header in-place, then call
-//      BrainClient::ask(). The client streams the dashboard's PCM16 reply
-//      through `bmo_audio_push_pcm16()` (defined above), which downsamples
-//      to 16 kHz and writes to the speaker.
+//   1. pollTouch() fires TOUCH_LONG_HOLD the instant a hold crosses
+//      kTalkHoldMs (~500ms) — while the finger is STILL down. askBrain()
+//      then records from the mic for as long as the user keeps holding
+//      (walkie-talkie style), showing the "listening" face the whole time,
+//      and stops the moment they release (bounded by a ~3s max).
+//   2. The captured PCM16 sits in the brain client's static request buffer;
+//      BrainClient::ask() wraps it in a multipart/WAV body in place (no
+//      heap) and streams the dashboard's PCM16 reply through
+//      `bmo_audio_push_pcm16()`, which downsamples to 16 kHz and plays it.
 //   3. Status callbacks pulse the face mood while listening / thinking /
-//      talking, then we return to the main mood loop.
+//      talking; a tap during the reply interrupts it gracefully.
 //
 // If WiFi or HTTP fails we play a soft "what?" cue and animate the
 // confused / sad mood briefly. Standalone behavior is still available via
@@ -1935,6 +2377,15 @@ static const char* brainStatusName(bmo::BrainStatus s) {
 static void onBrainStatus(bmo::BrainStatus s) {
   g_brainStatus = s;
   Serial.printf("[brain] status: %s\n", brainStatusName(s));
+  // Draw one frame immediately on every transition so the face reflects the
+  // new phase right away — but ONLY when the background render task isn't
+  // already driving the screen. During a brain request (g_brainFaceActive),
+  // faceRenderTask owns the framebuffer and SPI; rendering here too would race
+  // it and tear frames. The task picks up the new g_brainStatus on its next
+  // ~30 fps tick, so the transition still shows immediately.
+  if (!g_brainFaceActive) {
+    renderBrainStatusFrame(millis());
+  }
 }
 
 // Drives the listening / thinking / talking face moods until the brain task
@@ -1944,32 +2395,49 @@ static void renderBrainStatusFrame(uint32_t now) {
   FaceState s;
   switch (g_brainStatus) {
     case bmo::BrainStatus::Listening: {
-      s.eyeShape  = FaceState::EYE_NORMAL;
-      s.mouth     = FaceState::M_FLAT;
-      s.lidL      = s.lidR = 0.05f + 0.05f * sinf(now * 0.01f);
-      // gentle eye sway
-      s.pupilDx   = (int)(1.5f * sinf(now * 0.004f));
-      // ear-cupped pose: tiny tilt
-      s.shakeX    = (int)(1 * sinf(now * 0.003f));
-      fbDrawListeningMarks(now);
+      // "Tuned-in receiver" look: X eyes + an open, alert mouth, with a light
+      // datamosh glitch over the whole face so it reads like BMO is jacked
+      // into a live signal. Listening marks still pulse beside the mouth.
+      s.eyeShape  = FaceState::EYE_X;
+      s.mouth     = FaceState::M_OPEN;
+      // Mouth gently breathes open/closed while waiting for your voice.
+      s.mouthOpen = 0.3f + 0.25f * (0.5f + 0.5f * sinf(now * 0.012f));
+      s.shakeX    = (int)(1 * sinf(now * 0.02f));   // tiny jitter
+      s.listeningMarks = true;
+      s.glitchShift = 1;                            // subtle signal glitch
       break;
     }
     case bmo::BrainStatus::Thinking: {
-      s.eyeShape = FaceState::EYE_NORMAL;
-      s.mouth    = FaceState::M_FLAT;
-      s.pupilDx  = (int)(2 * sinf(now * 0.002f));
-      s.pupilDy  = -1;
-      s.shakeY   = (int)(0.5f * sinf(now * 0.003f));
-      fbDrawThinkingDots(now);
+      // "Processing" look: the mouth becomes a pulsing orb/ring that breathes,
+      // eyes drift in focused thought, and a faint glitch flickers now and
+      // then like cycles being burned.
+      s.eyeShape   = FaceState::EYE_SQUINT;
+      s.pupilDx    = (int)(2 * sinf(now * 0.002f));
+      s.pupilDy    = -1;
+      s.shakeY     = (int)(0.5f * sinf(now * 0.004f));
+      s.pulseMouth = true;            // pulsing processing orb (replaces mouth)
+      s.thinkingDots = true;          // orbiting "..." beside it
+      // Occasional brief glitch burst (~every ~1.5s) for a techy stutter.
+      s.glitchShift = ((now % 1500) < 160) ? 2 : 0;
       break;
     }
     case bmo::BrainStatus::Talking: {
-      // Mouth chatters with a faux-speech envelope; eyes warm.
-      const float wave = 0.5f + 0.5f * sinf(now * 0.018f);
+      // REAL lip-sync: the mouth opening tracks the live audio loudness
+      // envelope (g_talkLevel), updated as reply PCM is pushed to the speaker.
+      // A small floor keeps the mouth alive on quiet phonemes; a touch of
+      // sine adds natural micro-movement between syllables.
+      float lvl = g_talkLevel;
+      float micro = 0.06f * (0.5f + 0.5f * sinf(now * 0.05f));
       s.mouth     = FaceState::M_OPEN;
-      s.mouthOpen = 0.25f + 0.55f * wave;
-      s.eyeShape  = FaceState::EYE_CRESCENT;
-      s.lidL      = s.lidR = 0.25f;
+      s.mouthOpen = 0.08f + 0.9f * lvl + micro;
+      if (s.mouthOpen > 1.0f) s.mouthOpen = 1.0f;
+      s.eyeShape  = FaceState::EYE_NORMAL;
+      // Mostly-open eyes with a soft, slow blink — BMO talks with its eyes open.
+      const uint32_t blinkPhase = now % 2600;
+      s.lidL = s.lidR = (blinkPhase < 130) ? 0.8f : 0.08f;
+      // Brows/pupils lift a hair on loud syllables so the whole face emotes.
+      s.pupilDy = -(int)(2.0f * lvl);
+      s.pupilDx = (int)(1.0f * sinf(now * 0.006f));
       break;
     }
     default:
@@ -1979,59 +2447,254 @@ static void renderBrainStatusFrame(uint32_t now) {
   renderFrameWithParticles(s, now);
 }
 
+// Background render task. While g_brainFaceActive is set, this owns the screen
+// during the phases where the MAIN THREAD IS BLOCKED with no cooperative hook:
+// Listening (mic capture loop also renders, but this covers gaps) and Thinking
+// (the multi-second blocking HTTPClient::POST(), which is exactly when the face
+// used to freeze).
+//
+// It deliberately does NOT render during Talking. On the single-core C3, a
+// full SPI framebuffer flush from this task competes with the TLS stream read
+// loop for CPU and was starving the network — the reply audio cut off mid-
+// sentence with an mbedTLS read error. During Talking the brain client calls
+// brainShouldKeepTalking() between every audio chunk, so we render the talking
+// face cooperatively from THERE instead, which never blocks the stream.
+static void faceRenderTask(void* /*arg*/) {
+  for (;;) {
+    if (g_brainFaceActive && g_brainStatus != bmo::BrainStatus::Talking) {
+      if (xSemaphoreTake(g_faceMutex, portMAX_DELAY) == pdTRUE) {
+        if (g_brainFaceActive && g_brainStatus != bmo::BrainStatus::Talking) {
+          renderBrainStatusFrame(millis());
+        }
+        xSemaphoreGive(g_faceMutex);
+      }
+      vTaskDelay(pdMS_TO_TICKS(40));
+    } else {
+      vTaskDelay(pdMS_TO_TICKS(20));
+    }
+  }
+}
+
+// Hand the screen to the background render task for the duration of a brain
+// request, so the face stays alive while the main thread blocks on the network.
+static void brainFaceStart() {
+  g_brainFaceActive = true;
+}
+
+// Reclaim the screen for the main thread. Draining the mutex guarantees the
+// task has finished any in-flight frame before foreground code (interrupt /
+// error faces) draws again, so there's no torn frame at the handoff.
+static void brainFaceStop() {
+  g_brainFaceActive = false;
+  if (g_faceMutex) {
+    xSemaphoreTake(g_faceMutex, portMAX_DELAY);
+    xSemaphoreGive(g_faceMutex);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Mic self-test (record → playback). Triggered by the TICKLE gesture (3 rapid
+// taps). Records ~1.5s on the LEFT slot, then ~1.5s on the RIGHT slot, prints
+// the peak amplitude of each so we can SEE which channel the INMP441 lands on,
+// then plays the louder capture back through the speaker so you can HEAR it.
+//
+// This is the isolation test for the "empty transcript / all -1 samples"
+// problem: if BOTH channels read silent, it's wiring/power; if one channel has
+// real signal, we lock the capture to that channel.
+// -----------------------------------------------------------------------------
+static int32_t micTestPeak(const int16_t* pcm, size_t n) {
+  int32_t peak = 0;
+  for (size_t k = 0; k < n; ++k) {
+    int32_t a = pcm[k];
+    if (a < 0) a = -a;
+    if (a > peak) peak = a;
+  }
+  return peak;
+}
+
+static void micRecordPlaybackTest() {
+  int16_t* pcm = bmo::BrainClient::requestPcmBuffer();
+  const size_t cap = bmo::BrainClient::requestPcmCapacitySamples();
+  const size_t want = cap < 24000 ? cap : 24000;   // ~1.5s @ 16kHz
+
+  Serial.println("[mictest] === record/playback self-test ===");
+  Serial.println("[mictest] SPEAK NOW (left-channel capture)...");
+
+  // ---- LEFT channel ----
+  bmo::micSetChannel(false);
+  delay(40);
+  size_t gotL = 0;
+  uint32_t t0 = millis();
+  while (gotL < want && (millis() - t0) < 1600) {
+    size_t batch = want - gotL; if (batch > 1024) batch = 1024;
+    gotL += bmo::micCapture(pcm + gotL, batch, nullptr);
+  }
+  int32_t peakL = micTestPeak(pcm, gotL);
+  Serial.printf("[mictest] LEFT: %u samples, peak=%ld\n",
+                (unsigned)gotL, (long)peakL);
+
+  // Stash left capture's peak, then record RIGHT into the same buffer. We only
+  // need the peaks to decide; we replay whichever channel we end on if louder.
+  // ---- RIGHT channel ----
+  Serial.println("[mictest] SPEAK AGAIN (right-channel capture)...");
+  bmo::micSetChannel(true);
+  delay(40);
+  size_t gotR = 0;
+  t0 = millis();
+  while (gotR < want && (millis() - t0) < 1600) {
+    size_t batch = want - gotR; if (batch > 1024) batch = 1024;
+    gotR += bmo::micCapture(pcm + gotR, batch, nullptr);
+  }
+  int32_t peakR = micTestPeak(pcm, gotR);
+  Serial.printf("[mictest] RIGHT: %u samples, peak=%ld\n",
+                (unsigned)gotR, (long)peakR);
+
+  // The RIGHT capture currently lives in the buffer. Play it back so you can
+  // hear it. (If LEFT was the louder one we still demo RIGHT here, but the
+  // serial peaks tell the real story; we lock the winning channel below.)
+  Serial.println("[mictest] playing back RIGHT capture...");
+  size_t i = 0;
+  while (i < gotR) {
+    size_t n = gotR - i; if (n > 256) n = 256;
+    static int16_t out[256];
+    for (size_t k = 0; k < n; ++k) {
+      float f = (pcm[i + k] / 32768.0f) * g_volume * 3.0f;  // boost for audibility
+      if (f > 1.0f) f = 1.0f; else if (f < -1.0f) f = -1.0f;
+      out[k] = (int16_t)(f * 32767.0f);
+    }
+    size_t written = 0;
+    i2s_write(AUDIO_I2S_PORT, out, n * sizeof(int16_t), &written, portMAX_DELAY);
+    i += n;
+  }
+
+  // Lock capture to whichever channel had the stronger signal for normal use.
+  const bool useRight = peakR >= peakL;
+  bmo::micSetChannel(useRight);
+  Serial.printf("[mictest] === done. peakL=%ld peakR=%ld -> locking %s ===\n",
+                (long)peakL, (long)peakR, useRight ? "RIGHT" : "LEFT");
+}
+
 static void askBrain() {
-  // Stage 0: face says "listening" while we capture from mic.
+  // Stage 0: PUSH-TO-TALK capture. We record for as long as the user keeps
+  // holding the button (walkie-talkie style), showing the listening face the
+  // whole time, and send the moment they release. This is invoked from
+  // pollTouch() the instant the hold crosses kTalkHoldMs — i.e. while the
+  // finger is STILL down — so the capture window matches the physical hold.
   g_brainStatus = bmo::BrainStatus::Listening;
 
-  // 3 s capture cap (mic buffer is sized for it). The user already released
-  // the touch, so we don't have a "stop on release" lambda — capture until
-  // either the buffer fills or capture stalls.
-  int16_t* pcm = bmo::micStaticBuffer();
+  // Capture mic PCM DIRECTLY into the brain client's static request buffer.
+  // No separate mic buffer, no WAV copy, no body malloc — the brain client
+  // assembles the multipart body in place around this PCM region.
+  int16_t* pcm = bmo::BrainClient::requestPcmBuffer();
+  const size_t pcmCapacity = bmo::BrainClient::requestPcmCapacitySamples();
   const uint32_t captureStart = millis();
   size_t samples = 0;
-  // Animate the listening face for up to ~3s while we collect.
-  while (samples < bmo::kMicCaptureSamples && (millis() - captureStart) < 3500) {
-    const size_t batchTarget = (size_t)((millis() - captureStart) * 16); // ~16 sps/ms
-    const size_t want =
-        (batchTarget > samples && batchTarget - samples < 2048)
-            ? (batchTarget - samples)
-            : 1024;
-    const size_t cap = bmo::kMicCaptureSamples - samples;
-    const size_t batch = (want > cap) ? cap : want;
+
+  // Record while the button is held, bounded by the buffer (~3s) and a hard
+  // max so a stuck button can't hang. Stop early when the user releases —
+  // but require a short minimum so the initial press debounce doesn't end the
+  // capture before it starts.
+  constexpr uint32_t kMinCaptureMs = 300;
+  constexpr uint32_t kMaxCaptureMs = 2000;  // matches kMicCaptureSamples (2s @ 16kHz)
+  while (samples < pcmCapacity) {
+    const uint32_t elapsed = millis() - captureStart;
+    if (elapsed >= kMaxCaptureMs) break;
+    // Released after the minimum hold → user is done talking, send it.
+    if (elapsed >= kMinCaptureMs && !touchIsDown()) break;
+
+    const size_t cap = pcmCapacity - samples;
+    const size_t batch = cap < 1024 ? cap : 1024;
     const size_t got = bmo::micCapture(pcm + samples, batch, nullptr);
     samples += got;
     renderBrainStatusFrame(millis());
     if (got == 0) break;
   }
-  Serial.printf("[brain] captured %u samples (%lums)\n",
+  Serial.printf("[brain] captured %u samples (%lums held)\n",
                 static_cast<unsigned>(samples),
                 static_cast<unsigned long>(millis() - captureStart));
 
+  // Mic amplitude diagnostic + AUTO-GAIN. The INMP441 captures quite quietly
+  // (peak ~800/32767 ≈ 2.5% at normal speaking distance), and STT drops the
+  // quieter trailing words ("...melon apa") while catching the louder leading
+  // ones ("saya tanya warna..."). So after measuring the peak we normalize the
+  // whole capture up so the loudest sample hits ~70% full scale. This makes
+  // every word clearly audible to STT without the clipping that a fixed large
+  // gain would cause on loud input.
+  if (samples > 0) {
+    int32_t peak = 0;
+    int64_t sumSq = 0;
+    for (size_t k = 0; k < samples; ++k) {
+      int32_t a = pcm[k];
+      if (a < 0) a = -a;
+      if (a > peak) peak = a;
+      sumSq += (int64_t)pcm[k] * pcm[k];
+    }
+    const int rms = (int)sqrtf((float)(sumSq / (int64_t)samples));
+    Serial.printf("[mic] peak=%ld rms=%d first=[%d %d %d %d %d %d %d %d]\n",
+                  (long)peak, rms,
+                  pcm[0], pcm[1], pcm[2], pcm[3],
+                  pcm[4], pcm[5], pcm[6], pcm[7]);
+
+    // Auto-gain toward a target peak of ~22000 (≈67% FS). The INMP441 on this
+    // board captures very quietly (peak often 400–800 ≈ 1–2% FS), so the gain
+    // needed is large — allow up to 48x. This is what lets STT hear the quiet
+    // trailing words. We only ever boost; we never attenuate a loud capture.
+    if (peak > 4) {
+      constexpr int32_t kTargetPeak = 22000;
+      float gain = (float)kTargetPeak / (float)peak;
+      if (gain > 48.0f) gain = 48.0f;   // generous ceiling for a quiet mic
+      if (gain > 1.0f) {
+        for (size_t k = 0; k < samples; ++k) {
+          int32_t v = (int32_t)(pcm[k] * gain);
+          if (v > 32767) v = 32767;
+          else if (v < -32768) v = -32768;
+          pcm[k] = (int16_t)v;
+        }
+        Serial.printf("[mic] applied gain x%.1f (peak %ld -> ~%ld)\n",
+                      gain, (long)peak, (long)(peak * gain));
+      }
+    }
+  }
+
   if (samples < 4000) {
-    // <250ms of audio; treat as cancellation, no point sending.
+    // <250ms of audio; treat as cancellation (a too-brief hold), don't send.
     Serial.println("[brain] capture too short, skipping");
     g_brainStatus = bmo::BrainStatus::Idle;
     return;
   }
 
-  // Build a RIFF/WAVE header and concatenate with the PCM bytes. We allocate
-  // a contiguous buffer on the heap so the brain client can hand it to
-  // HTTPClient::POST() in one shot.
-  const size_t pcmBytes = samples * sizeof(int16_t);
-  const size_t totalBytes = 44 + pcmBytes;
-  uint8_t* wav = static_cast<uint8_t*>(malloc(totalBytes));
-  if (wav == nullptr) {
-    Serial.printf("[brain] oom for wav (%u bytes)\n",
-                  static_cast<unsigned>(totalBytes));
-    g_brainStatus = bmo::BrainStatus::Error;
+  // Stage 1+: brain client assembles the body in place and takes over,
+  // emitting Thinking → Talking → Idle. No malloc/free here anymore.
+  //
+  // ask() blocks the main thread for several seconds (DNS/TLS, the POST,
+  // streaming). Hand the screen to the background render task for that whole
+  // window so the listening / thinking / talking face keeps animating instead
+  // of freezing on a single frame during the blocking POST.
+  g_talkInterrupted = false;
+  brainFaceStart();
+  const bool ok = g_brain.ask(samples);
+  brainFaceStop();
+
+  // Graceful user interrupt: BMO was talking and got tapped. Acknowledge with
+  // a short happy cue + warm face so it feels like "oh! okay!" rather than a
+  // glitch. ask() returned true (clean stop), so we land here, not the error
+  // branch below.
+  if (g_talkInterrupted) {
+    Serial.println("[brain] reply interrupted — playing acknowledgement");
+    g_talkInterrupted = false;
+    playClipOrSynth("bmo_ok", playBmoStartled);
+    const uint32_t ackStart = millis();
+    while (millis() - ackStart < 600) {
+      FaceState s;
+      s.eyeShape = FaceState::EYE_CRESCENT;
+      s.mouth = FaceState::M_SMILE;
+      s.lidL = s.lidR = 0.2f;
+      renderFrameWithParticles(s, millis());
+      delay(28);
+    }
+    g_brainStatus = bmo::BrainStatus::Idle;
     return;
   }
-  bmo::wavWriteHeader(wav, pcmBytes, 16000, 1, 16);
-  memcpy(wav + 44, pcm, pcmBytes);
-
-  // Stage 1+: brain client takes over. It emits Thinking → Talking → Idle.
-  const bool ok = g_brain.ask(wav, totalBytes);
-  free(wav);
 
   if (!ok) {
     Serial.println("[brain] ask() failed; playing fallback");
@@ -2052,17 +2715,55 @@ static void askBrain() {
   g_brainStatus = bmo::BrainStatus::Idle;
 }
 
+// Fires a spontaneous "random thought": asks the dashboard to generate, store,
+// and speak one short musing, then plays it through the speaker. Reuses the
+// brain client's status callbacks + interrupt predicate, and the same
+// background face-render handoff as askBrain() so the thinking/talking face
+// animates while the main thread blocks on the network. Returns quietly on a
+// 204 (BMO chose not to think) or any failure — an idle thought is never an
+// error the child should see.
+static void maybeThinkAloud() {
+  Serial.println("[brain] idle thought trigger (touch threshold reached)");
+  g_brainStatus = bmo::BrainStatus::Thinking;
+  g_talkInterrupted = false;
+  brainFaceStart();
+  const bool ok = g_brain.requestThought();
+  brainFaceStop();
+
+  // If the child interrupted the musing, give the same soft "okay!" cue +
+  // happy face that an interrupted reply gets, so it feels intentional.
+  if (g_talkInterrupted) {
+    playClipOrSynth("bmo_ok", playBmoStartled);
+    const uint32_t ackStart = millis();
+    while (millis() - ackStart < 500) {
+      uint32_t now = millis();
+      FaceState s;
+      s.eyeShape = FaceState::EYE_CRESCENT;
+      s.mouth = FaceState::M_SMILE;
+      renderFrameWithParticles(s, now);
+      delay(28);
+    }
+  }
+  g_brainStatus = bmo::BrainStatus::Idle;
+  (void)ok;  // failures stay silent; nothing to surface to the child
+}
+
 static void playReaction(TouchKind k) {
   Serial.printf("touch: %s\n", touchKindName(k));
   particlesClear();
-  playReactionGlance(k);
 
-  // -------- LONG_HOLD: route to dashboard brain instead of canned reaction --
+  // -------- LONG_HOLD: push-to-talk → dashboard brain ----------------------
+  // Skip the glance animation here: this fires the instant the hold crosses
+  // the talk threshold (finger still down), so we want to start capturing
+  // immediately and not clip the first word behind a 110ms glance.
   if (k == TOUCH_LONG_HOLD) {
     askBrain();
     particlesClear();
     return;
   }
+
+  // Non-talk reactions get the quick glance toward the touch point.
+  playReactionGlance(k);
 
   switch (k) {
 
@@ -2072,8 +2773,9 @@ static void playReaction(TouchKind k) {
     // dart eyes seeking culprit → relief blink → nervous smile + faint blush
     // ─────────────────────────────────────────────────────────────────────
     case TOUCH_QUICK_POKE: {
-      // Voice: clip "bmo_what" if available, otherwise synth startled
-      playClipOrSynth("bmo_what", playBmoStartled);
+      // Voice: rotating generic BMO greeting (e.g. "oh, hi you!") if any
+      // greeting clips are baked, otherwise the startled synth chirp.
+      playGreeting(playBmoStartled);
       // Phase A — squash 80ms (anticipation)
       uint32_t pA = millis();
       while (millis() - pA < 80) {
@@ -2148,8 +2850,9 @@ static void playReaction(TouchKind k) {
     // pink cheek puffs. Eyes track toward touch on entry.
     // ─────────────────────────────────────────────────────────────────────
     case TOUCH_HOLD: {
-      // Voice: clip "bmo_hi_friend" if available, otherwise synth
-      playClipOrSynth("bmo_hi_friend", playBmoHi);
+      // Voice: rotating generic BMO greeting if any greeting clips are baked,
+      // otherwise the synth "hi" warble.
+      playGreeting(playBmoHi);
       // Phase A — glance 220ms: pupils swing toward touch (right), eyes squint happy
       uint32_t pA = millis();
       while (millis() - pA < 220) {
@@ -2300,6 +3003,11 @@ static void playReaction(TouchKind k) {
     // pupils spin up briefly then settle into closed crescents
     // ─────────────────────────────────────────────────────────────────────
     case TOUCH_TICKLE: {
+      // DIAGNOSTIC: 3 rapid taps run the mic record/playback self-test. This
+      // records both I2S channels, prints their peak levels, and plays the
+      // capture back so we can tell whether the mic is wired/working and which
+      // channel slot carries its data. Remove once the mic is confirmed good.
+      micRecordPlaybackTest();
       // Voice: clip "bmo_laugh" if available, otherwise synth
       playClipOrSynth("bmo_laugh", playBmoLaugh);
       // Phase A — burst of giggles (350ms): sharp high "ha!"
@@ -2402,7 +3110,15 @@ void setup() {
   digitalWrite(PIN_DC, HIGH);
   digitalWrite(PIN_RST, HIGH);
 
-  pinMode(PIN_TOUCH, INPUT);   // TTP223 actively drives HIGH/LOW
+  // INPUT_PULLDOWN, not bare INPUT. With a bare INPUT the line floats whenever
+  // the TTP223 isn't actively driving it, and a floating C3 input drifts/
+  // oscillates LOW↔HIGH on its own — which pollTouch() reads as an endless
+  // stream of phantom press/release events (the "keeps looping like it's
+  // touched" bug). The internal pulldown parks the line at a solid LOW when
+  // idle; the TTP223 still drives a strong HIGH on real contact and overrides
+  // it easily, so genuine touches register while phantoms can't. Same pin
+  // (GP20) — this only turns on the chip's internal resistor.
+  pinMode(PIN_TOUCH, INPUT_PULLDOWN);
 
   Serial.begin(115200);
   delay(200);
@@ -2416,6 +3132,15 @@ void setup() {
   fbFill(C_BG);
   flushFrame();
 
+  // Background face render task: keeps the brain-status face animating while
+  // the main thread is blocked on the network during a request (see
+  // faceRenderTask / brainFaceStart / brainFaceStop). The C3 is single-core,
+  // but the main thread yields to the scheduler whenever it blocks on I/O, so
+  // this task naturally fills those gaps. g_faceMutex serializes fb + SPI
+  // access between the two so they never draw at the same time.
+  g_faceMutex = xSemaphoreCreateMutex();
+  xTaskCreate(faceRenderTask, "faceRender", 4096, nullptr, 1, &g_faceTaskHandle);
+
   audioInit();
   Serial.println("audio ready");
 
@@ -2426,10 +3151,29 @@ void setup() {
     Serial.println("mic init failed; long-hold-to-ask will not work");
   }
 
+  // ── MIC SELF-TEST ────────────────────────────────────────────────────────
+  // On-demand via the TICKLE gesture (3 rapid taps), not at boot — boot timing
+  // made it hard to catch on the serial monitor. See micRecordPlaybackTest()
+  // wired into the TOUCH_TICKLE case.
+
   // ── Provisioning ───────────────────────────────────────────────────────
   // If the user is holding the touch button while we boot, treat that as a
   // factory-reset gesture: wipe NVS so the captive portal opens fresh.
+  //
+  // Require the line to read HIGH continuously for ~1.5s before honouring it.
+  // A single instantaneous read on this line can glitch HIGH from electrical
+  // noise, and a phantom hit here would wipe the user's saved WiFi/dashboard
+  // creds — destructive. A sustained hold can't be faked by a brief glitch.
+  bool resetGesture = false;
   if (digitalRead(PIN_TOUCH) == HIGH) {
+    const uint32_t holdStart = millis();
+    resetGesture = true;
+    while (millis() - holdStart < 1500) {
+      if (digitalRead(PIN_TOUCH) != HIGH) { resetGesture = false; break; }
+      delay(10);
+    }
+  }
+  if (resetGesture) {
     Serial.println("[boot] factory reset gesture detected — clearing creds");
     bmo::g_provisioning.clear();
     // Show a brief "RESET" face so the user knows the gesture was honoured.
@@ -2476,6 +3220,7 @@ void setup() {
   // Brain client uses the URL we just got; status callback drives the
   // listening / thinking / talking face moods.
   g_brain.onStatus(onBrainStatus);
+  g_brain.onShouldKeepTalking(brainShouldKeepTalking);
   g_brain.setDashboardUrl(bmo::g_provisioning.dashboardUrl());
   if (wifiUp) {
     g_brain.markWifiReady();
@@ -2518,11 +3263,21 @@ void loop() {
     // Top-of-scene check: if a touch is pending, react immediately.
     if (g_touchPending) {
       g_touchPending = false;
-      playReaction(g_pendingKind);
+      const TouchKind kind = g_pendingKind;
+      playReaction(kind);
+      countTouchForThought(kind);
       // Run a couple more reactions if user keeps touching (chain)
       while (g_touchPending) {
         g_touchPending = false;
-        playReaction(g_pendingKind);
+        const TouchKind chained = g_pendingKind;
+        playReaction(chained);
+        countTouchForThought(chained);
+      }
+      // After the interaction settles, BMO may muse aloud if it's been played
+      // with enough times (see countTouchForThought / kTouchesPerThought).
+      if (g_thoughtDue) {
+        g_thoughtDue = false;
+        maybeThinkAloud();
       }
     }
     playMood(sc.m, sc.ms);

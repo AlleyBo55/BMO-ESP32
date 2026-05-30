@@ -21,6 +21,8 @@ const SKILL_NAMES: ReadonlyArray<SkillName> = [
   'story',
   'comfort',
   'play_pretend',
+  'memory',
+  'random_thoughts',
 ];
 
 const SKILL_NAME_SET: ReadonlySet<string> = new Set<string>(SKILL_NAMES);

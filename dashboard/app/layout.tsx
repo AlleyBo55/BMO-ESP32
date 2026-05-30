@@ -10,8 +10,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'BMO Dashboard',
-  description: 'Configuration and brain backend for the BMO ESP32-C3 device.',
+  title: 'BMO',
+  description: 'A tiny ESP32-C3 companion with touch, voice, moods, and memory.',
 };
 
 export default function RootLayout({

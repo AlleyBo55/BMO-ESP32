@@ -21,10 +21,13 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <string.h>
 
 // Only the fingerprint is compiled in; WiFi creds + dashboard URL come from
 // the provisioning singleton at runtime.
 #include "../include/secrets.h"
+#include "bmo_mic.h"   // kMicCaptureSamples
+#include "bmo_wav.h"   // wavWriteHeader
 
 namespace bmo {
 
@@ -34,18 +37,73 @@ namespace {
 constexpr const char* kMultipartBoundary =
     "----BMOFirmwareBoundaryE4F2A1B0C3D9";
 
+// Fixed multipart prefix/suffix as compile-time constants so their lengths are
+// known and we can lay out the request body in a single static buffer (no
+// runtime allocation — see s_body below). These MUST stay in sync with
+// kMultipartBoundary above: the prefix line is "--" + boundary, the suffix is
+// "\r\n--" + boundary + "--".
+constexpr char kBodyPrefix[] =
+    "------BMOFirmwareBoundaryE4F2A1B0C3D9\r\n"
+    "Content-Disposition: form-data; name=\"audio\"; filename=\"capture.wav\"\r\n"
+    "Content-Type: audio/wav\r\n"
+    "\r\n";
+constexpr char kBodySuffix[] =
+    "\r\n------BMOFirmwareBoundaryE4F2A1B0C3D9--\r\n";
+
+constexpr size_t kBodyPrefixLen = sizeof(kBodyPrefix) - 1;  // drop NUL
+constexpr size_t kBodySuffixLen = sizeof(kBodySuffix) - 1;
+constexpr size_t kWavHeaderLen  = 44;
+
+// Bytes reserved BEFORE the PCM region for [prefix][wav header]. Must be a
+// multiple of 4 so the PCM region that follows is 4-byte aligned for the I2S
+// DMA, and large enough to hold prefix + wav header.
+constexpr size_t kHeaderReserve = 256;
+static_assert(kBodyPrefixLen + kWavHeaderLen <= kHeaderReserve,
+              "header reserve too small for multipart prefix + wav header");
+
+// Single static request-body buffer. Layout:
+//   [ ... pad ... ][ prefix ][ wav hdr ][ PCM samples ........ ][ suffix ]
+//                  ^p (POST start)       ^kHeaderReserve (PCM, 4-aligned)
+// This replaces the previous design that held the mic capture, a WAV copy,
+// and the multipart body as THREE separate ~96 KB allocations — which OOM'd
+// on the C3 (only ~96 KB free heap after WiFi/TLS). Now: zero heap, one BSS
+// buffer, the mic captures straight into the PCM region.
+__attribute__((aligned(4)))
+uint8_t s_body[kHeaderReserve + (kMicCaptureSamples * sizeof(int16_t)) +
+               kBodySuffixLen];
+
 // Streaming response buffer. ESP32-C3 has ~320 KiB of SRAM; 4 KiB is the
 // design.md spec ("4 KiB audio chunks straight into the I2S buffer").
 constexpr size_t kAudioChunkBytes = 4096;
 
-constexpr uint32_t kConnectTimeoutMs       = 5000;
-constexpr uint32_t kFirstByteTimeoutMs     = 10000;
-constexpr uint32_t kTotalResponseTimeoutMs = 30000;
+constexpr uint32_t kConnectTimeoutMs       = 10000;
+// First-byte timeout must cover the WHOLE pre-audio pipeline on the dashboard:
+// STT → full LLM completion → TTS open, plus a possible Vercel cold start.
+// That regularly exceeds 10s, so the old 10s value killed every real request
+// with -11 (READ_TIMEOUT) before the reply could start. The dashboard's own
+// budget is 60s (TOTAL_BUDGET_MS / Vercel maxDuration), so give the firmware
+// headroom up to that.
+constexpr uint32_t kFirstByteTimeoutMs     = 45000;
+constexpr uint32_t kTotalResponseTimeoutMs = 60000;
+
+// Maximum time we'll keep playing a single reply, measured from the first
+// audio chunk. This is a UX/safety cap (don't let BMO monologue forever, and
+// recover if the dashboard streams a pathologically long clip), NOT a memory
+// limit — reply audio streams chunk-by-chunk straight to I2S and never
+// accumulates in RAM. A clean stop here ends with a soft cue + neutral face,
+// not the harsh error face.
+constexpr uint32_t kMaxTalkMs = 20000;
 
 // Forward-declared in the header so main.cpp / audio task can supply this.
 // This module does not own the I2S setup; it only feeds bytes in.
 extern "C" void bmo_audio_push_pcm16(const uint8_t* data, size_t len)
     __attribute__((weak));
+
+// Resets the downsampler's cross-chunk state (leftover byte + skip phase) so a
+// new reply starts byte-aligned. Without this, an odd-length previous reply
+// leaves a stale half-sample that misaligns the entire next stream into noise.
+// Weak so the firmware provides it; in tests/no-audio builds it's a no-op.
+extern "C" void bmo_audio_reset_stream() __attribute__((weak));
 
 // Forward declared here so main.cpp can read the latest volume the dashboard
 // asked us to use, and apply it to g_volume. Declared via a weak C symbol so
@@ -61,34 +119,20 @@ void writePcm16ChunkToAudio(const uint8_t* data, size_t len) {
   // docs/HARDWARE-SMOKE-TEST.md catches this as "audio plays but it's noise".
 }
 
-String buildMultipartPrefix() {
-  String s;
-  s.reserve(192);
-  s += "--";
-  s += kMultipartBoundary;
-  s += "\r\n";
-  s += "Content-Disposition: form-data; name=\"audio\"; filename=\"capture.wav\"\r\n";
-  s += "Content-Type: audio/wav\r\n";
-  s += "\r\n";
-  return s;
-}
-
-String buildMultipartSuffix() {
-  String s;
-  s.reserve(64);
-  s += "\r\n--";
-  s += kMultipartBoundary;
-  s += "--\r\n";
-  return s;
-}
-
 }  // namespace
 
 BrainClient::BrainClient()
-    : statusCb_(nullptr), status_(BrainStatus::Idle), wifiBegun_(false) {}
+    : statusCb_(nullptr),
+      shouldKeepTalkingCb_(nullptr),
+      status_(BrainStatus::Idle),
+      wifiBegun_(false) {}
 
 void BrainClient::onStatus(void (*cb)(BrainStatus)) {
   statusCb_ = cb;
+}
+
+void BrainClient::onShouldKeepTalking(bool (*cb)()) {
+  shouldKeepTalkingCb_ = cb;
 }
 
 void BrainClient::emit_(BrainStatus s) {
@@ -113,7 +157,15 @@ void BrainClient::begin() {
   emit_(BrainStatus::Error);
 }
 
-bool BrainClient::ask(const uint8_t* wavData, size_t wavLen) {
+int16_t* BrainClient::requestPcmBuffer() {
+  return reinterpret_cast<int16_t*>(s_body + kHeaderReserve);
+}
+
+size_t BrainClient::requestPcmCapacitySamples() {
+  return kMicCaptureSamples;
+}
+
+bool BrainClient::ask(size_t pcmSampleCount) {
   emit_(BrainStatus::Listening);
 
   if (WiFi.status() != WL_CONNECTED) {
@@ -121,36 +173,41 @@ bool BrainClient::ask(const uint8_t* wavData, size_t wavLen) {
     emit_(BrainStatus::Error);
     return false;
   }
-  if (wavData == nullptr || wavLen == 0) {
-    Serial.println("[brain] empty wav buffer");
+  if (pcmSampleCount == 0 || pcmSampleCount > kMicCaptureSamples) {
+    Serial.printf("[brain] bad pcm sample count: %u\n",
+                  static_cast<unsigned>(pcmSampleCount));
     emit_(BrainStatus::Error);
     return false;
   }
 
-  // Build multipart body. The body is sent in three writes via HTTPClient's
-  // sendRequest(method, payload, len) — for that we need the prefix, raw wav,
-  // and suffix concatenated into one buffer. The wav payload is the bulk and
-  // is bounded by mic capture size; on this firmware ~64 KiB max.
-  const String prefix = buildMultipartPrefix();
-  const String suffix = buildMultipartSuffix();
-  const size_t totalLen = prefix.length() + wavLen + suffix.length();
-
-  // Large allocation lives in the heap; a typical 3-second 16 kHz PCM16 capture
-  // is ~96 KiB, comfortably within the ESP32-C3's SRAM after framework usage.
-  uint8_t* body = static_cast<uint8_t*>(malloc(totalLen));
-  if (body == nullptr) {
-    Serial.printf("[brain] oom allocating %u bytes for request body\n",
-                  static_cast<unsigned>(totalLen));
-    emit_(BrainStatus::Error);
-    return false;
-  }
-  memcpy(body, prefix.c_str(), prefix.length());
-  memcpy(body + prefix.length(), wavData, wavLen);
-  memcpy(body + prefix.length() + wavLen, suffix.c_str(), suffix.length());
+  // Assemble the multipart body IN PLACE inside s_body, with no heap
+  // allocation. The mic has already captured PCM into requestPcmBuffer()
+  // (== s_body + kHeaderReserve). We lay the prefix + WAV header immediately
+  // before it and the suffix immediately after it:
+  //
+  //   s_body: [pad][ prefix ][ wav hdr ][ PCM .......... ][ suffix ]
+  //                 ^bodyStart          ^kHeaderReserve
+  //
+  // POST starts at bodyStart and runs for totalLen bytes. This replaces the
+  // old two-malloc design (a 96 KB WAV copy + a 96 KB body copy) that OOM'd
+  // on the C3's tiny post-WiFi heap.
+  const size_t pcmBytes = pcmSampleCount * sizeof(int16_t);
+  const size_t bodyStart = kHeaderReserve - kBodyPrefixLen - kWavHeaderLen;
+  uint8_t* body = s_body + bodyStart;
+  memcpy(body, kBodyPrefix, kBodyPrefixLen);
+  wavWriteHeader(body + kBodyPrefixLen, pcmBytes, 16000, 1, 16);
+  // PCM already lives at s_body + kHeaderReserve, which is exactly
+  // body + kBodyPrefixLen + kWavHeaderLen — no copy needed.
+  memcpy(s_body + kHeaderReserve + pcmBytes, kBodySuffix, kBodySuffixLen);
+  const size_t totalLen = kBodyPrefixLen + kWavHeaderLen + pcmBytes + kBodySuffixLen;
 
   WiFiClientSecure tls;
   tls.setInsecure();  // see file header comment — fingerprint is the real auth.
   tls.setTimeout(kConnectTimeoutMs / 1000);
+
+  Serial.printf("[brain] pre-TLS heap: free=%u maxAlloc=%u\n",
+                static_cast<unsigned>(ESP.getFreeHeap()),
+                static_cast<unsigned>(ESP.getMaxAllocHeap()));
 
   HTTPClient http;
   http.setTimeout(kFirstByteTimeoutMs);
@@ -159,13 +216,11 @@ bool BrainClient::ask(const uint8_t* wavData, size_t wavLen) {
   String url = dashboardUrl_ + "/api/brain";
   if (dashboardUrl_.length() == 0) {
     Serial.println("[brain] no dashboard url configured");
-    free(body);
     emit_(BrainStatus::Error);
     return false;
   }
   if (!http.begin(tls, url)) {
     Serial.println("[brain] http.begin failed");
-    free(body);
     emit_(BrainStatus::Error);
     return false;
   }
@@ -185,7 +240,6 @@ bool BrainClient::ask(const uint8_t* wavData, size_t wavLen) {
   emit_(BrainStatus::Thinking);
   const uint32_t requestStart = millis();
   const int status = http.POST(body, totalLen);
-  free(body);
 
   if (status != 200) {
     Serial.printf("[brain] POST /api/brain status=%d in %lums\n",
@@ -221,12 +275,33 @@ bool BrainClient::ask(const uint8_t* wavData, size_t wavLen) {
     return false;
   }
 
+  // Reset the downsampler's cross-chunk byte/phase state so this reply starts
+  // byte-aligned regardless of how the previous one ended (see the weak-symbol
+  // comment above). Skipping this is what turned the 2nd+ reply into noise.
+  if (bmo_audio_reset_stream) bmo_audio_reset_stream();
+
   uint8_t buf[kAudioChunkBytes];
   size_t totalBytes = 0;
   bool firstChunk = true;
+  uint32_t talkStart = 0;          // set on first audio chunk
+  bool interrupted = false;        // user tapped to stop
+  bool talkCapped = false;         // hit kMaxTalkMs
   const uint32_t totalDeadline = requestStart + kTotalResponseTimeoutMs;
 
   while (http.connected() && millis() < totalDeadline) {
+    // User-initiated interrupt (e.g. touch during playback). Clean stop, not
+    // an error — BMO behaves like a person who's been interrupted mid-word.
+    if (!firstChunk && shouldKeepTalkingCb_ && !shouldKeepTalkingCb_()) {
+      interrupted = true;
+      break;
+    }
+    // Talk-duration cap. Measured from the first chunk so connect/think time
+    // doesn't count against it.
+    if (!firstChunk && (millis() - talkStart) >= kMaxTalkMs) {
+      talkCapped = true;
+      break;
+    }
+
     const size_t available = stream->available();
     if (available == 0) {
       delay(2);
@@ -243,6 +318,7 @@ bool BrainClient::ask(const uint8_t* wavData, size_t wavLen) {
       Serial.printf("[brain] streaming audio, first chunk %lums after request\n",
                     static_cast<unsigned long>(millis() - requestStart));
       firstChunk = false;
+      talkStart = millis();
       emit_(BrainStatus::Talking);
     }
 
@@ -251,6 +327,25 @@ bool BrainClient::ask(const uint8_t* wavData, size_t wavLen) {
   }
 
   http.end();
+
+  // Clean, user-initiated stop: caller plays a soft "okay!" cue + neutral
+  // mood. We return true (success) so the caller doesn't show the error face.
+  if (interrupted) {
+    Serial.printf("[brain] talk interrupted by user after %lums, %u bytes\n",
+                  static_cast<unsigned long>(millis() - requestStart),
+                  static_cast<unsigned>(totalBytes));
+    emit_(BrainStatus::Idle);
+    return true;
+  }
+
+  // Hit the talk cap: also a graceful stop (BMO trails off), not an error.
+  if (talkCapped) {
+    Serial.printf("[brain] talk cap (%lums) reached, %u bytes — trailing off\n",
+                  static_cast<unsigned long>(kMaxTalkMs),
+                  static_cast<unsigned>(totalBytes));
+    emit_(BrainStatus::Idle);
+    return true;
+  }
 
   if (millis() >= totalDeadline) {
     Serial.printf("[brain] total-response timeout after %lums, %u bytes\n",
@@ -261,6 +356,158 @@ bool BrainClient::ask(const uint8_t* wavData, size_t wavLen) {
   }
 
   Serial.printf("[brain] stream ended after %lums, %u bytes\n",
+                static_cast<unsigned long>(millis() - requestStart),
+                static_cast<unsigned>(totalBytes));
+  emit_(BrainStatus::Idle);
+  return true;
+}
+
+bool BrainClient::requestThought() {
+  // No mic capture and no request body — this is a GET. The dashboard does the
+  // recall + LLM + capture and streams back the spoken musing (or 204 to say
+  // "not this round"). Status starts at Thinking since there's nothing to
+  // listen to.
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[brain] (thought) wifi not connected");
+    emit_(BrainStatus::Error);
+    return false;
+  }
+  if (dashboardUrl_.length() == 0) {
+    Serial.println("[brain] (thought) no dashboard url configured");
+    emit_(BrainStatus::Error);
+    return false;
+  }
+
+  WiFiClientSecure tls;
+  tls.setInsecure();  // see file header — fingerprint is the real auth.
+  tls.setTimeout(kConnectTimeoutMs / 1000);
+
+  HTTPClient http;
+  http.setTimeout(kFirstByteTimeoutMs);
+  http.setReuse(false);
+
+  const String url = dashboardUrl_ + "/api/brain/idle-thought";
+  if (!http.begin(tls, url)) {
+    Serial.println("[brain] (thought) http.begin failed");
+    emit_(BrainStatus::Error);
+    return false;
+  }
+
+  http.addHeader("X-BMO-Fingerprint", BMO_FINGERPRINT);
+  http.addHeader("Accept", "audio/L16;rate=24000;channels=1");
+  static const char* kCollectedHeaders[] = { "X-BMO-Volume" };
+  http.collectHeaders(kCollectedHeaders, 1);
+
+  emit_(BrainStatus::Thinking);
+  const uint32_t requestStart = millis();
+  const int status = http.GET();
+
+  // 204 No Content: BMO chose not to think this round (skill off, or the
+  // dashboard skipped generation). A clean non-event — go back to Idle and
+  // report success so the caller doesn't flash an error face.
+  if (status == 204) {
+    Serial.printf("[brain] (thought) 204 no-content in %lums — staying quiet\n",
+                  static_cast<unsigned long>(millis() - requestStart));
+    http.end();
+    emit_(BrainStatus::Idle);
+    return true;
+  }
+
+  if (status != 200) {
+    Serial.printf("[brain] (thought) GET status=%d in %lums\n",
+                  status,
+                  static_cast<unsigned long>(millis() - requestStart));
+    http.end();
+    emit_(BrainStatus::Error);
+    return false;
+  }
+
+  // Propagate dashboard-controlled volume before the first chunk plays.
+  if (bmo_set_volume_from_dashboard) {
+    String vh = http.header("X-BMO-Volume");
+    if (vh.length() > 0) {
+      const long parsed = vh.toInt();
+      if (parsed >= 0 && parsed <= 100) {
+        bmo_set_volume_from_dashboard(static_cast<int>(parsed));
+      }
+    }
+  }
+
+  WiFiClient* stream = http.getStreamPtr();
+  if (stream == nullptr) {
+    Serial.println("[brain] (thought) no response stream");
+    http.end();
+    emit_(BrainStatus::Error);
+    return false;
+  }
+
+  // Same streaming loop as ask(): byte-align the downsampler, then pump 4 KiB
+  // chunks straight to I2S, honoring the interrupt predicate and talk cap.
+  if (bmo_audio_reset_stream) bmo_audio_reset_stream();
+
+  uint8_t buf[kAudioChunkBytes];
+  size_t totalBytes = 0;
+  bool firstChunk = true;
+  uint32_t talkStart = 0;
+  bool interrupted = false;
+  bool talkCapped = false;
+  const uint32_t totalDeadline = requestStart + kTotalResponseTimeoutMs;
+
+  while (http.connected() && millis() < totalDeadline) {
+    if (!firstChunk && shouldKeepTalkingCb_ && !shouldKeepTalkingCb_()) {
+      interrupted = true;
+      break;
+    }
+    if (!firstChunk && (millis() - talkStart) >= kMaxTalkMs) {
+      talkCapped = true;
+      break;
+    }
+
+    const size_t available = stream->available();
+    if (available == 0) {
+      delay(2);
+      continue;
+    }
+    const size_t toRead = available > sizeof(buf) ? sizeof(buf) : available;
+    const int read = stream->readBytes(buf, toRead);
+    if (read <= 0) break;
+
+    if (firstChunk) {
+      Serial.printf("[brain] (thought) streaming audio, first chunk %lums after request\n",
+                    static_cast<unsigned long>(millis() - requestStart));
+      firstChunk = false;
+      talkStart = millis();
+      emit_(BrainStatus::Talking);
+    }
+
+    writePcm16ChunkToAudio(buf, static_cast<size_t>(read));
+    totalBytes += static_cast<size_t>(read);
+  }
+
+  http.end();
+
+  if (interrupted) {
+    Serial.printf("[brain] (thought) interrupted by user after %lums, %u bytes\n",
+                  static_cast<unsigned long>(millis() - requestStart),
+                  static_cast<unsigned>(totalBytes));
+    emit_(BrainStatus::Idle);
+    return true;
+  }
+  if (talkCapped) {
+    Serial.printf("[brain] (thought) talk cap reached, %u bytes — trailing off\n",
+                  static_cast<unsigned>(totalBytes));
+    emit_(BrainStatus::Idle);
+    return true;
+  }
+  if (millis() >= totalDeadline) {
+    Serial.printf("[brain] (thought) total-response timeout after %lums, %u bytes\n",
+                  static_cast<unsigned long>(millis() - requestStart),
+                  static_cast<unsigned>(totalBytes));
+    emit_(BrainStatus::Error);
+    return false;
+  }
+
+  Serial.printf("[brain] (thought) stream ended after %lums, %u bytes\n",
                 static_cast<unsigned long>(millis() - requestStart),
                 static_cast<unsigned>(totalBytes));
   emit_(BrainStatus::Idle);

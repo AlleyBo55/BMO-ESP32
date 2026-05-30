@@ -20,8 +20,10 @@ vi.mock('@/lib/supabase-admin', () => ({
   getServiceClient: () => mockClient,
 }));
 
-beforeEach(() => {
+beforeEach(async () => {
   mockClient = createMockServiceClient();
+  const config = await import('@/lib/config');
+  config.clearConfigCache();
 });
 
 afterEach(() => {

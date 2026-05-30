@@ -18,7 +18,7 @@ import 'server-only';
  * to a safe no-op when its backing table or an upstream call is unavailable.
  */
 
-export type MemoryKind = 'conversation' | 'fact' | 'note';
+export type MemoryKind = 'conversation' | 'fact' | 'note' | 'thought';
 
 /** A stored memory row, mirrors public.brain_memory. */
 export interface MemoryRow {
