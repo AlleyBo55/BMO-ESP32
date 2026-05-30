@@ -16,7 +16,8 @@ export type SkillName =
   | 'play_music'
   | 'story'
   | 'comfort'
-  | 'play_pretend';
+  | 'play_pretend'
+  | 'memory';
 
 /** Per-skill toggle plus optional opaque parameter bag. */
 export interface SkillState {

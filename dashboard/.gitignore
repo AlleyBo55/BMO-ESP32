@@ -47,3 +47,6 @@ pnpm-debug.log*
 # local supabase
 supabase/.branches
 supabase/.temp
+
+# local end-to-end test artifacts (generated audio + transcripts)
+scripts/e2e-out/

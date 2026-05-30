@@ -1,43 +1,20 @@
-import CreditsLive, { type CreditsSnapshot } from '@/components/CreditsLive';
-import { fetchCredits } from '@/lib/openrouter';
+import CreditsLive from '@/components/CreditsLive';
 import { getServiceClient } from '@/lib/supabase-admin';
 import type { ActivityLogEntry } from '@/lib/types';
 
 /**
  * Admin home page.
  *
- * Server-rendered. Performs two server-side fetches in parallel:
- *
- *   1. `fetchCredits()` for the OpenRouter balance — wrapped in try/catch so
- *      that an upstream OpenRouter outage does not break the dashboard. The
- *      result is passed to {@link CreditsLive} which keeps it fresh client-side.
- *   2. The 10 most recent rows from `activity_log`, ordered by `created_at`
- *      descending, so the admin can see the live device traffic at a glance.
+ * Server-rendered. Performs a single fast server-side fetch (recent activity
+ * from Supabase) and renders immediately. The OpenRouter credit balance is
+ * NOT fetched here on purpose: it used to block the entire HTML response on a
+ * network hop to OpenRouter (up to a 10s timeout) on every navigation, which
+ * made the dashboard feel sluggish. {@link CreditsLive} now fetches the
+ * balance client-side on mount (and polls every 60s), hitting the
+ * `/api/openrouter/credits` route which memoizes the upstream call for 30s.
  */
 
 export const dynamic = 'force-dynamic';
-
-interface InitialCredits {
-  data: CreditsSnapshot | null;
-  stale: boolean;
-}
-
-async function loadInitialCredits(): Promise<InitialCredits> {
-  try {
-    const credits = await fetchCredits();
-    return {
-      data: {
-        total: credits.total,
-        used: credits.used,
-        remaining: credits.remaining,
-        currency: credits.currency,
-      },
-      stale: false,
-    };
-  } catch {
-    return { data: null, stale: true };
-  }
-}
 
 async function loadRecentActivity(): Promise<ActivityLogEntry[]> {
   const supabase = getServiceClient();
@@ -79,10 +56,7 @@ function statusBadgeClass(status: ActivityLogEntry['status']): string {
 }
 
 export default async function HomePage(): Promise<React.ReactElement> {
-  const [credits, activity] = await Promise.all([
-    loadInitialCredits(),
-    loadRecentActivity(),
-  ]);
+  const activity = await loadRecentActivity();
 
   return (
     <div className="space-y-8">
@@ -93,7 +67,7 @@ export default async function HomePage(): Promise<React.ReactElement> {
         </p>
       </header>
 
-      <CreditsLive initialData={credits.data} initialStale={credits.stale} />
+      <CreditsLive initialData={null} initialStale={false} />
 
       <section className="rounded-lg border border-zinc-800 bg-zinc-900">
         <div className="border-b border-zinc-800 px-5 py-3">

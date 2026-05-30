@@ -81,6 +81,13 @@ export default function CreditsLive({
       }
     };
 
+    // Fetch immediately on mount so the card fills in without waiting a full
+    // poll interval. The server no longer blocks its render on the OpenRouter
+    // call, so this client-side fetch is what populates the numbers. The
+    // `/api/openrouter/credits` route memoizes upstream for 30s per instance,
+    // so this stays cheap even across navigations.
+    void fetchOnce();
+
     const timer = setInterval(() => {
       void fetchOnce();
     }, POLL_INTERVAL_MS);
@@ -97,10 +104,16 @@ export default function CreditsLive({
       <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-zinc-300">OpenRouter credits</h2>
-          <span className="text-xs text-amber-400">stale</span>
+          {stale ? (
+            <span className="text-xs text-amber-400">stale</span>
+          ) : (
+            <span className="text-xs text-zinc-500">loading…</span>
+          )}
         </div>
         <p className="mt-3 text-sm text-zinc-500">
-          No credit data available. Check OPENROUTER_API_KEY and try again.
+          {stale
+            ? 'No credit data available. Check OPENROUTER_API_KEY and try again.'
+            : 'Fetching balance…'}
         </p>
       </div>
     );

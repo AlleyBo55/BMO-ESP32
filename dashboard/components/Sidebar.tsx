@@ -32,7 +32,8 @@ interface NavItem {
     | '/songs'
     | '/providers'
     | '/fingerprint'
-    | '/activity';
+    | '/activity'
+    | '/simulator';
 }
 
 const NAV_ITEMS: ReadonlyArray<NavItem> = [
@@ -43,6 +44,7 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { label: 'Providers', href: '/providers' },
   { label: 'Fingerprint', href: '/fingerprint' },
   { label: 'Activity', href: '/activity' },
+  { label: 'Simulator', href: '/simulator' },
 ];
 
 interface SidebarProps {
