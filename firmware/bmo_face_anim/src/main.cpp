@@ -1106,6 +1106,11 @@ static uint8_t s_pcmLeftoverByte = 0;
 static bool    s_pcmHasLeftover  = false;
 static uint8_t s_pcmSkipPhase    = 0;  // 0,1,2 — skip when phase == 2.
 
+// Persistent one-pole low-pass state for the playback anti-alias filter (see
+// bmo_audio_push_pcm16). Carried across chunks so the filter is continuous;
+// reset between replies by bmo_audio_reset_stream().
+static float s_aaLpState = 0.0f;
+
 // Live talking-loudness envelope, 0.0..1.0, updated as reply/clip audio is
 // pushed to I2S. The talking face reads this so the mouth moves with the
 // ACTUAL voice (real lip-sync) instead of a canned sine wiggle. Written from
@@ -1141,12 +1146,22 @@ extern "C" void bmo_audio_reset_stream() {
   s_pcmLeftoverByte = 0;
   s_pcmHasLeftover  = false;
   s_pcmSkipPhase    = 0;
+  s_aaLpState       = 0.0f;
   g_talkLevel       = 0.0f;
 }
 
 extern "C" void bmo_audio_push_pcm16(const uint8_t* data, size_t len) {
   if (data == nullptr || len < 2) return;
-  // 24 → 16 kHz downsample by dropping 1 of every 3 input samples.
+  // 24 → 16 kHz downsample by keeping 2 of every 3 input samples.
+  //
+  // ANTI-ALIASING: we must NOT just drop samples. The reply audio has energy
+  // up to ~12 kHz (sibilants — "s"/"sh"); dropping samples folds that band
+  // back down as a harsh "sssk sssk" hiss. So every incoming 24 kHz sample is
+  // first run through a one-pole low-pass that rolls off the highs that would
+  // alias, THEN we decimate the filtered signal. Cheap (one mul/add per
+  // sample) and kills the hiss. `kAaAlpha` sets the corner (~6–7 kHz at
+  // 24 kHz): smaller = darker/smoother, larger = brighter but more hiss.
+  constexpr float kAaAlpha = 0.45f;
   uint8_t& leftoverByte = s_pcmLeftoverByte;
   bool&    hasLeftover  = s_pcmHasLeftover;
   uint8_t& skipPhase    = s_pcmSkipPhase;
@@ -1158,8 +1173,10 @@ extern "C" void bmo_audio_push_pcm16(const uint8_t* data, size_t len) {
         static_cast<uint16_t>(leftoverByte) |
         (static_cast<uint16_t>(data[0]) << 8));
     hasLeftover = false;
+    // Always filter (keeps the LPF state continuous), even on dropped samples.
+    s_aaLpState += kAaAlpha * (static_cast<float>(sample) - s_aaLpState);
     if (skipPhase != 2) {
-      float f = (static_cast<float>(sample) / 32768.0f) * g_volume;
+      float f = (s_aaLpState / 32768.0f) * g_volume;
       if (f >  1.0f) f =  1.0f;
       else if (f < -1.0f) f = -1.0f;
       int16_t out = static_cast<int16_t>(f * 32767.0f);
@@ -1180,13 +1197,17 @@ extern "C" void bmo_audio_push_pcm16(const uint8_t* data, size_t len) {
         (static_cast<uint16_t>(data[i + 1]) << 8));
     i += 2;
 
+    // Run EVERY sample through the anti-alias low-pass so its state stays
+    // continuous, then decimate by keeping 2 of 3.
+    s_aaLpState += kAaAlpha * (static_cast<float>(sample) - s_aaLpState);
+
     if (skipPhase == 2) {
       skipPhase = 0;
       continue;
     }
     skipPhase++;
 
-    float f = (static_cast<float>(sample) / 32768.0f) * g_volume;
+    float f = (s_aaLpState / 32768.0f) * g_volume;
     if (f >  1.0f) f =  1.0f;
     else if (f < -1.0f) f = -1.0f;
     batch[batchN++] = static_cast<int16_t>(f * 32767.0f);

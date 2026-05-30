@@ -59,11 +59,15 @@ export const BMO_RADIO_FX_DEFAULTS: RadioFxOptions = {
   highpassHz: 520,
   lowpassHz: 3600,
   q: 0.9,
-  decimate: 2,
-  bits: 10,
-  drive: 1.6,
+  // decimate was 2 (sample-and-hold) — that INTENTIONALLY injects aliasing,
+  // which on sibilants ("s"/"sh") turns into a harsh "sssk sssk" hiss. The
+  // band-limiting from the high/low-pass already gives the small-speaker
+  // character, so we disable the aliasing decimator and lift the bit depth.
+  decimate: 1,
+  bits: 12,
+  drive: 1.4,
   outGain: 1.05,
-  mix: 0.85,
+  mix: 0.8,
 };
 
 /** Direct-Form-I biquad coefficients (already normalized by a0). */

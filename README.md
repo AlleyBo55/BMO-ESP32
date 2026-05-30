@@ -184,6 +184,27 @@ Plug in your USB cable. BMO comes alive. Touch it. Hear it greet you back.
 
 ---
 
+## ⚡ Don't want to build? Flash a prebuilt binary
+
+Every release ships ready-to-flash binaries built by GitHub Actions — no PlatformIO, no toolchain, no repo checkout. You just need Python's `esptool`.
+
+1. **Grab the binaries.** Download the latest from [**Releases**](https://github.com/AlleyBo55/BMO-ESP32/releases) (or the **Artifacts** of a [firmware build run](https://github.com/AlleyBo55/BMO-ESP32/actions)). Unzip.
+2. **Plug BMO in** with a **data** USB-C cable.
+3. **Flash with one command:**
+
+   ```bash
+   pip install esptool      # one-time
+   ./flash.sh               # auto-detects the port, flashes the merged image
+   ```
+
+   Handy flags: `./flash.sh -p /dev/ttyACM0` (pick the port), `--erase` (wipe saved WiFi), `--monitor` (watch the serial log after). Prefer raw esptool? `esptool.py --chip esp32c3 write_flash -z 0x0 bmo-firmware-merged.bin`.
+
+4. **Set up WiFi on the device.** First boot, BMO opens a **`BMO-Setup-XXXX`** WiFi hotspot. Join it from your phone and enter your home WiFi + dashboard URL — no creds are baked into the public binary.
+
+> **Heads up:** public binaries are **generic** — they carry no WiFi password and no dashboard auth fingerprint. BMO will animate, take WiFi setup, and run locally, but **talking to the cloud brain needs a personalized build** with your dashboard fingerprint compiled in (set the `BMO_FINGERPRINT` repo secret for a private CI build, or flash locally with your `.env`). Full details in [`firmware/bmo_face_anim/README-WIRING.md`](firmware/bmo_face_anim/README-WIRING.md#flashing-a-prebuilt-binary-no-platformio).
+
+---
+
 ## 📖 Wiring & how it all works
 
 **Everything you need is in [`documentation.html`](documentation.html).**
