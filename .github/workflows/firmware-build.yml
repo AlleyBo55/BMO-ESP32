@@ -1,0 +1,152 @@
+name: Firmware build
+
+# Builds the BMO ESP32-C3 firmware and publishes ready-to-flash binaries.
+#
+# Triggers:
+#   - push to master that touches the firmware  -> build + upload artifacts
+#   - tag push v*                                -> build + attach bins to a Release
+#   - manual run (workflow_dispatch)             -> build + upload artifacts
+#
+# Output (downloadable from the run's "Artifacts", or the Release on a tag):
+#   - bmo-firmware-merged.bin  : single image, flash to 0x0 in one command
+#   - bootloader.bin / partitions.bin / boot_app0.bin / firmware.bin : the
+#     individual images, for the multi-offset flash flow
+#   - flash.sh                 : helper script that wraps esptool
+#
+# SECRETS / PERSONALISATION
+# -------------------------
+# The build renders include/secrets.h from .env (see scripts/check_secrets_h.py).
+# By default every value is a PLACEHOLDER, which is the correct, safe choice for
+# a public artifact: the device collects WiFi + dashboard URL at runtime through
+# its captive portal, and ships with NO embedded auth token.
+#
+# A maintainer MAY bake real values by setting these in the repo
+# (Settings -> Secrets and variables -> Actions):
+#   - secret  BMO_FINGERPRINT  : the dashboard device fingerprint (auth token)
+#   - variable BMO_DASHBOARD_URL: the deployed dashboard origin
+#   - secret  BMO_WIFI_SSID / BMO_WIFI_PASS : a fixed WiFi network
+#
+# WARNING: if you set BMO_FINGERPRINT, the produced binary contains your
+# dashboard auth token. NEVER attach such a binary to a PUBLIC release. Use it
+# only for private artifacts. For public releases, leave it unset.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'firmware/**'
+      - '.github/workflows/firmware-build.yml'
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# Cancel an in-progress run when a newer commit lands on the same ref.
+concurrency:
+  group: firmware-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write   # needed to create Releases on tag pushes
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware/bmo_face_anim
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache PlatformIO + pip
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          # Bust the cache when the platform pin or deps change.
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/bmo_face_anim/platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-
+
+      - name: Install PlatformIO + esptool
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade platformio esptool
+
+      - name: Render firmware .env (placeholders unless secrets are set)
+        env:
+          # Empty string when unset; the `||` then falls back to the placeholder.
+          BMO_WIFI_SSID: ${{ secrets.BMO_WIFI_SSID }}
+          BMO_WIFI_PASS: ${{ secrets.BMO_WIFI_PASS }}
+          BMO_WIFI_SSID2: ${{ secrets.BMO_WIFI_SSID2 }}
+          BMO_WIFI_PASS2: ${{ secrets.BMO_WIFI_PASS2 }}
+          BMO_DASHBOARD_URL: ${{ vars.BMO_DASHBOARD_URL }}
+          BMO_FINGERPRINT: ${{ secrets.BMO_FINGERPRINT }}
+        run: |
+          # Placeholders use the REPLACE_ prefix the firmware recognises at
+          # runtime (see isPlaceholder() in bmo_provisioning.cpp) to drop into
+          # the captive portal instead of trying to connect.
+          {
+            echo "WIFI_SSID=${BMO_WIFI_SSID:-REPLACE_WIFI_SSID}"
+            echo "WIFI_PASS=${BMO_WIFI_PASS:-REPLACE_WIFI_PASS}"
+            echo "WIFI_SSID2=${BMO_WIFI_SSID2:-}"
+            echo "WIFI_PASS2=${BMO_WIFI_PASS2:-}"
+            echo "DASHBOARD_URL=${BMO_DASHBOARD_URL:-REPLACE_DASHBOARD_URL}"
+            echo "FINGERPRINT=${BMO_FINGERPRINT:-REPLACE_FINGERPRINT}"
+          } > .env
+          # Report whether this is a generic or personalised build (without
+          # printing any secret value).
+          if [ -n "${BMO_FINGERPRINT}" ]; then
+            echo "::warning::Built with an embedded BMO_FINGERPRINT — treat this binary as PRIVATE, do not publish it."
+          else
+            echo "Generic build: placeholder fingerprint. Device provisions WiFi + URL via captive portal; brain auth needs a personalised flash."
+          fi
+
+      - name: Build firmware
+        run: pio run -e esp32c3_supermini
+
+      - name: Merge into a single flashable image
+        run: |
+          BUILD_DIR=.pio/build/esp32c3_supermini
+          BOOT_APP0="$(find "$HOME/.platformio/packages" -name boot_app0.bin -path '*tools/partitions*' | head -n1)"
+          if [ -z "$BOOT_APP0" ]; then
+            echo "Could not locate boot_app0.bin"; exit 1
+          fi
+          mkdir -p dist
+          # Single image at 0x0 — flashes with one command (see flash.sh).
+          esptool.py --chip esp32c3 merge_bin \
+            -o dist/bmo-firmware-merged.bin \
+            --flash_mode dio --flash_freq 80m --flash_size 4MB \
+            0x0 "$BUILD_DIR/bootloader.bin" \
+            0x8000 "$BUILD_DIR/partitions.bin" \
+            0xe000 "$BOOT_APP0" \
+            0x10000 "$BUILD_DIR/firmware.bin"
+          # Also ship the individual images for the multi-offset flow.
+          cp "$BUILD_DIR/bootloader.bin" "$BUILD_DIR/partitions.bin" "$BUILD_DIR/firmware.bin" "$BOOT_APP0" dist/
+          cp scripts/flash.sh dist/flash.sh
+          chmod +x dist/flash.sh
+          ls -la dist
+          echo "Merged image size: $(stat -c%s dist/bmo-firmware-merged.bin) bytes"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bmo-firmware-${{ github.sha }}
+          path: firmware/bmo_face_anim/dist/*
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Attach binaries to Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: firmware/bmo_face_anim/dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

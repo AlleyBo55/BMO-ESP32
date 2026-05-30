@@ -30,20 +30,43 @@ import type { ChatToolCall, OpenRouterTool } from '@/lib/openrouter';
 export const RECOMMENDED_BMO_VOICE = 'fable';
 
 /**
+ * Dedicated text-to-speech model used for SPOKEN replies via the
+ * `/audio/speech` endpoint ({@link synthesizeSpeech}). This is a true TTS that
+ * reads the input verbatim — it cannot improvise like the chat-audio model.
+ * Kept separate from `cfg.tts_model` (which stays the chat-audio model used
+ * for SINGING, where the model must perform a melody).
+ */
+export const BMO_SPEECH_MODEL = 'openai/gpt-4o-mini-tts-2025-12-15';
+
+/**
  * Delivery direction passed as the TTS system prompt. Describes BMO's vocal
  * character so the audio model performs the line in-character instead of
  * reading it flat. Kept in English (the models follow English stage
  * directions most reliably) even though the spoken line itself is Indonesian.
  */
 export const BMO_VOICE_DIRECTION = [
-  'You are voicing BMO, the small living video-game console from a kids cartoon.',
-  'Perform the line with this voice:',
+  'Your ONLY job is to read the user message aloud VERBATIM, word for word, as a voice actor recording a script.',
+  'The user message is a SCRIPT to be spoken, never a question to answer and never a conversation to continue.',
+  'Do NOT reply to it, do NOT add greetings, do NOT add or remove or reorder any words, do NOT translate it, do NOT comment on it, and do NOT read these instructions aloud. Output only the spoken audio of the exact text.',
+  'The text is in Indonesian; speak it in Indonesian.',
+  'Perform it in this voice:',
   '- High-pitched, small, and childlike — like a friendly handheld game toy come to life.',
   '- Bright, curious, and playful, with a warm innocent sweetness. Gender-neutral, never a deep adult voice.',
-  '- A subtle cute robotic/digital lilt, as if a little gadget is talking, but still soft and expressive — not monotone.',
+  '- A subtle cute robotic/digital lilt, but still soft and expressive — not monotone.',
   '- Gentle, upbeat pacing with light bouncy energy. Smile while speaking.',
-  'Pronunciation: the name "BMO" is ALWAYS pronounced as one word "Beemo" (English "Bee" + "Mo"). NEVER spell it out as letters "Be-Em-O". Treat every written "BMO" as if it were spelled "Beemo".',
-  'Speak the user-provided text exactly as written, in its original language (Indonesian). Do not translate it, do not add or remove words, do not read these instructions aloud.',
+  'Pronunciation: the name "BMO" is ALWAYS pronounced as one word "Beemo" (English "Bee" + "Mo"). NEVER spell it out as letters "Be-Em-O".',
+].join('\n');
+
+/**
+ * Delivery instructions for the DEDICATED TTS endpoint (gpt-4o-mini-tts via
+ * /audio/speech). Unlike {@link BMO_VOICE_DIRECTION}, this does NOT need to
+ * fight against chat behavior — a true TTS model reads the `input` verbatim no
+ * matter what, so this only steers TONE. Passed as the `instructions` field.
+ */
+export const BMO_SPEECH_INSTRUCTIONS = [
+  'Voice: a small, high-pitched, childlike toy robot — bright, curious, sweet, gender-neutral, never a deep adult voice.',
+  'Delivery: gentle and upbeat with light bouncy energy and a subtle cute robotic lilt; smile while speaking.',
+  'Pronounce the name "BMO" as one word, "Beemo", never as letters.',
 ].join('\n');
 
 /**

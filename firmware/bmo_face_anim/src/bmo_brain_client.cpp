@@ -195,7 +195,10 @@ bool BrainClient::ask(size_t pcmSampleCount) {
   const size_t bodyStart = kHeaderReserve - kBodyPrefixLen - kWavHeaderLen;
   uint8_t* body = s_body + bodyStart;
   memcpy(body, kBodyPrefix, kBodyPrefixLen);
-  wavWriteHeader(body + kBodyPrefixLen, pcmBytes, 16000, 1, 16);
+  // The mic may decimate (e.g. 8 kHz) to fit a longer capture in the fixed
+  // buffer, so the WAV header MUST advertise the mic's EFFECTIVE rate — not a
+  // hardcoded 16000 — or STT decodes the PCM at the wrong speed and garbles it.
+  wavWriteHeader(body + kBodyPrefixLen, pcmBytes, micEffectiveRate(), 1, 16);
   // PCM already lives at s_body + kHeaderReserve, which is exactly
   // body + kBodyPrefixLen + kWavHeaderLen — no copy needed.
   memcpy(s_body + kHeaderReserve + pcmBytes, kBodySuffix, kBodySuffixLen);

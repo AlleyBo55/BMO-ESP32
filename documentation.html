@@ -143,6 +143,7 @@
     <a href="#audio">Audio</a>
     <a href="#touch">Touch</a>
     <a href="#voice">Voice clips</a>
+    <a href="#brain">Voice &amp; brain</a>
     <a href="#extending">Extending</a>
     <a href="#references">References</a>
   </nav>
@@ -304,7 +305,7 @@ C3's "GND" pin ───────┬── ALL component GNDs share this rail
         <tr><th>Symptom</th><th>Likely cause</th></tr>
         <tr><td>No sound at all</td><td>MAX98357A power on 3V3 instead of 5V; DIN not on GP2; speaker leads not connected</td></tr>
         <tr><td>Crackling / popping</td><td>USB undersized — switch to a 1 A adapter; add 100 µF cap on amp's 5V/GND</td></tr>
-        <tr><td>Very quiet</td><td>GAIN pin tied to wrong rail; <code>g_volume</code> too low (default 0.234)</td></tr>
+        <tr><td>Very quiet</td><td>GAIN pin tied to wrong rail; <code>g_volume</code> too low (default 0.328)</td></tr>
         <tr><td>Distorted at peaks</td><td>Volume too high; reduce <code>g_volume</code> or untie GAIN</td></tr>
       </table>
 
@@ -601,6 +602,106 @@ pio run -t upload</code></pre>
     </section>
 
     <!-- ============================================================ -->
+    <section id="brain">
+      <h2>Voice, brain &amp; memory <span class="pillbox new">new</span></h2>
+
+      <p>BMO holds real conversations. Hold the touch pad, speak, release — the
+      device records your voice, ships it to the dashboard's brain route, and
+      streams back a spoken reply, all while the face shows what stage it's in.</p>
+
+      <h3>The conversation pipeline</h3>
+<ascii-art>hold touch ─▶ mic capture (16 kHz PCM16) ─▶ HTTPS POST /api/brain
+                                                  │
+                                                  ▼
+                                   STT ─▶ LLM (+ memory) ─▶ streaming TTS
+                                                  │
+                              PCM16 audio ◀───────┘
+                                  │
+                                  ▼
+                          downsample 24→16 kHz ─▶ I2S ─▶ speaker
+                                  │
+                          live envelope ─▶ lip-synced talking mouth</ascii-art>
+
+      <ol>
+        <li><strong>Capture.</strong> A long-hold (≥500 ms) starts a walkie-talkie capture. The mic records straight into the brain client's request buffer (no extra copies) until you release, capped at ~2 s by the C3's TLS-safe memory budget.</li>
+        <li><strong>Auto-gain.</strong> The INMP441 records very quietly (~1–2% full-scale). Before sending, the firmware measures the peak and normalizes up to ~67% FS (gain capped at 48×) so speech-to-text catches every word, including quiet trailing syllables.</li>
+        <li><strong>Send.</strong> One multipart POST with the captured WAV and the <code>X-BMO-Fingerprint</code> auth header.</li>
+        <li><strong>Reply.</strong> The dashboard runs STT → LLM → TTS and streams PCM16 back; the firmware downsamples 24→16 kHz and feeds it to the I2S speaker chunk by chunk.</li>
+      </ol>
+
+      <div class="warn">
+        <strong>The mic-on-GPIO8 trap.</strong> The INMP441 data pin (SD) must
+        <em>not</em> sit on <code>GP8</code> — it's a boot strapping pin held
+        HIGH (and tied to the onboard LED on the SuperMini). Wired there, the
+        I2S input reads a stuck <code>0xFFFF</code> (every sample <code>-1</code>),
+        the capture is pure silence, STT returns an empty transcript, and BMO
+        "answers randomly." The fix is to put SD on <code>GP5</code> (a free,
+        non-strapping pin). <code>GP9</code> is also a strapping pin — avoid it too.
+      </div>
+
+      <h3>Timeouts</h3>
+      <p>The brain reply isn't instant: STT + full LLM completion + TTS open,
+      plus a possible serverless cold start, regularly exceeds 10 s. The brain
+      client's first-byte timeout is <strong>45 s</strong> and the total-response
+      timeout is <strong>60 s</strong> (matching the dashboard's own budget). The
+      old 10 s value killed every real request with a read timeout before the
+      reply could start.</p>
+
+      <h3>The face never freezes</h3>
+      <p>The firmware is single-threaded, so a blocking HTTPS POST would freeze
+      the last frame. A small background FreeRTOS render task keeps the
+      <em>listening</em> and <em>thinking</em> faces animating while the main
+      thread is parked on the network. <em>Talking</em> renders cooperatively
+      between audio chunks instead — on the single-core C3, a background SPI
+      flush during streaming starves the TLS read loop and truncates the reply.</p>
+
+      <table>
+        <thead><tr><th>State</th><th>Face</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>Listening</td><td>X-eyes + open mouth + subtle datamosh glitch + listening marks</td><td>Reads like BMO is "jacked into" a live signal while it records you.</td></tr>
+          <tr><td>Thinking</td><td>Squint eyes + a pulsing "processing orb" mouth + occasional glitch flicker</td><td>A pause that looks like computing, not a hang.</td></tr>
+          <tr><td>Talking</td><td>Open eyes (soft blink) + mouth driven by the live audio envelope</td><td>Real lip-sync — the mouth moves with the actual voice.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Lip-sync</h3>
+      <p>As reply (or clip) PCM is pushed to the speaker, a fast-attack /
+      slow-release envelope follower tracks loudness into <code>g_talkLevel</code>
+      (0–1). The talking mouth opening is driven from that value, so BMO's mouth
+      snaps open on syllables and eases shut between them. Touch greetings use
+      the same path so BMO visibly <em>says</em> "hai!" rather than playing audio
+      over a frozen face.</p>
+
+      <h3>Memory — short-term + durable</h3>
+      <p>The dashboard brain layer is gbrain-inspired (see
+      <a href="https://github.com/garrytan/gbrain">garrytan/gbrain</a>), built on
+      Supabase + OpenRouter embeddings:</p>
+      <ul>
+        <li><strong>Short-term continuity.</strong> The last several turns of the current session are replayed to the model as real chat history, so follow-ups work: ask "what color is an apple?", answer "red", and BMO stays on that thread instead of changing the subject.</li>
+        <li><strong>Durable profile.</strong> After each exchange, stable facts (name, age, favorites, fears, friends) are mined and upserted by key — so the <em>newest</em> value always wins. The child's name is <strong>learned, never hardcoded</strong>; if BMO doesn't know it yet, it playfully asks once, then remembers.</li>
+        <li><strong>Semantic recall.</strong> Relevant older memories are pulled by vector similarity and folded into the prompt.</li>
+        <li><strong>Always degradable.</strong> If embeddings, the table, or the network fail, every memory call resolves to empty/no-op — BMO keeps talking, the route never 502s on a memory failure.</li>
+      </ul>
+
+      <h3>Style &amp; pronunciation</h3>
+      <p>The brain prompt keeps replies short and direct (1–2 sentences, answer
+      first) instead of rambling, and the TTS voice direction enforces that
+      "BMO" is always pronounced <strong>"Beemo"</strong>, never spelled out as
+      letters.</p>
+
+      <h3>Baking BMO-voice greetings</h3>
+      <p>Generic greetings ("Halo!", "Hai teman!") play instantly on a normal
+      touch. They're generated once in BMO's real dashboard voice, then baked to
+      flash so they need no network and have zero latency:</p>
+      <pre>cd firmware/bmo_face_anim
+python3 tools/gen_greetings.py   # calls the dashboard TTS, trims, downsamples to 16 kHz WAV
+python3 tools/bake_audio.py      # packs audio/*.wav into src/audio_clips.h
+pio run -e esp32c3_supermini -t upload</pre>
+      <p>The firmware rotates through whichever greeting clips are baked so BMO
+      doesn't repeat itself, and falls back to the synth chirp if none are present.</p>
+    </section>
+
+    <!-- ============================================================ -->
     <section id="extending">
       <h2>Extending BMO</h2>
 
@@ -631,16 +732,14 @@ pio run -t upload</code></pre>
       <h3>Hook into web simulator</h3>
       <p>The repo includes a Next.js + Tailwind simulator under <code>web/</code> that connects via Web Serial. The firmware can emit JSON-over-USB lines for each rendered mood and accept inbound mood/sensor commands. To enable simulator mode, swap the body of <code>renderFrame()</code> — same face state, different output backend.</p>
 
-      <h3>Add WiFi + cloud STT/LLM/TTS (planned)</h3>
-      <p>The conversation pipeline is sketched out:</p>
-      <ol>
-        <li>INMP441 mic captures audio while touch is held → 3 sec int16 PCM in RAM</li>
-        <li>HTTPS POST to <code>api.openai.com/v1/audio/transcriptions</code> (Whisper)</li>
-        <li>POST transcript to <code>api.anthropic.com/v1/messages</code> (Claude)</li>
-        <li>POST reply to <code>api.openai.com/v1/audio/speech</code> (TTS)</li>
-        <li>Stream resulting audio bytes directly to I2S → speaker</li>
-      </ol>
-      <p>Memory budget on the C3 is tight (~340 KB needed, 320 KB available) — workaround is to record at 8 kHz or stream uploads instead of buffering.</p>
+      <h3>WiFi + cloud STT/LLM/TTS <span class="pillbox new">shipped</span></h3>
+      <p>This is live — see the <a href="#brain">Voice, brain &amp; memory</a>
+      section for the full pipeline. In brief: the INMP441 captures audio while
+      the touch pad is held, the firmware POSTs it to the dashboard's
+      <code>/api/brain</code> route (STT → LLM → streaming TTS on OpenRouter),
+      and the PCM16 reply streams straight to the I2S speaker. Memory budget on
+      the C3 is tight, so capture is bounded to ~2 s and the reply is streamed
+      chunk-by-chunk rather than buffered.</p>
 
       <h3>Move to a different screen</h3>
       <p>Update <code>TFT_W</code>, <code>TFT_H</code>, <code>X_OFFSET</code>, <code>Y_OFFSET</code>, and the MADCTL byte. The 40 KB framebuffer scales linearly — 240×240 round display = 115 KB, still fits the C3's RAM.</p>

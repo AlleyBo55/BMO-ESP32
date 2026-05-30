@@ -34,6 +34,17 @@ export interface OrganMapItem {
   y: string;
 }
 
+export interface BrainCapability {
+  /** gbrain skill/idea this is modeled on. */
+  gbrain: string;
+  /** BMO's name for it. */
+  title: string;
+  /** Plain-language description of what it gives BMO. */
+  body: string;
+  /** The real module/route that implements it. */
+  module: string;
+}
+
 export const PROJECT_REPO_URL = 'https://github.com/AlleyBo55/BMO-ESP32';
 export const GBRAIN_REPO_URL = 'https://github.com/garrytan/gbrain';
 
@@ -50,25 +61,25 @@ export const MOMENTS = [
     key: 'listen',
     label: 'Listen',
     title: 'Listening has its own face.',
-    body: 'The mic state becomes visible, patient, and calm before any voice response happens.',
-    signal: 'I2S mic -> voice route',
-    animation: 'round listening mouth, slow eye glances, patient blink',
+    body: 'While the mic records you, the face shows a live, glitchy "tuned-in" state so the device clearly looks like it is hearing you.',
+    signal: 'I2S mic -> brain route',
+    animation: 'X-eyes, an open alert mouth, listening marks, and a subtle screen glitch',
   },
   {
     key: 'think',
     label: 'Think',
     title: 'A pause can feel alive.',
-    body: 'A glance and tiny thought bubbles make the brain request read as thinking, not waiting.',
+    body: 'During the network round-trip the mouth becomes a pulsing processing orb so the wait reads as computing, not freezing.',
     signal: 'ESP32-C3 -> brain API',
-    animation: 'side glance, small smile, two tiny thought bubbles',
+    animation: 'focused squint eyes, a breathing orb mouth, and an occasional glitch flicker',
   },
   {
     key: 'talk',
     label: 'Talk',
-    title: 'The mouth has rhythm.',
-    body: 'Small mouth shapes let speech feel playful while staying cheap enough for tiny hardware.',
-    signal: 'text -> tiny voice pack',
-    animation: 'three mouth shapes timed like a compact voice waveform',
+    title: 'The mouth follows the voice.',
+    body: 'Real lip-sync drives the mouth from the live audio loudness, with open, lively eyes — BMO looks like it is actually speaking.',
+    signal: 'reply audio -> live envelope',
+    animation: 'mouth opening tracks the streamed voice; soft slow blink',
   },
   {
     key: 'bashful',
@@ -100,30 +111,30 @@ export const FEATURES = [
   },
   {
     title: 'Voice loop',
-    body: 'BMO can move from listening to thinking to talking, so voice input has a visible status at every step.',
+    body: 'BMO moves from listening to thinking to talking, so voice input has a visible status at every step — and the talking mouth lip-syncs to the reply.',
     owner: 'INMP441, brain API, MAX98357A',
     visible:
-      'The face says listening while audio is captured, thinking while the reply is prepared, and talking while sound plays.',
+      'The face shows a glitchy listening state while recording, a pulsing thinking orb during the round-trip, and a lip-synced mouth while the reply plays.',
     implementation:
-      'Captured audio is sent to the brain route; streamed PCM16 output feeds the I2S speaker path.',
+      'Held-touch captures auto-gained 16 kHz audio sent to the brain route; streamed PCM16 feeds the I2S speaker while a live envelope drives the mouth.',
   },
   {
     title: 'Tiny voice pack',
-    body: 'Small local clips keep instant reactions fast, while streamed replies cover conversation.',
+    body: 'Short local clips keep instant reactions fast, while streamed replies cover open conversation.',
     owner: 'Audio clips + voice service',
     visible:
-      'BMO can chirp instantly on touch and still speak longer generated replies when the brain route answers.',
+      'BMO greets you instantly (and lip-syncs) on a normal touch, and still speaks longer generated replies when the brain route answers.',
     implementation:
-      'Short clips are baked into firmware assets; generated replies are streamed to avoid storing large audio on the ESP32.',
+      'Greetings are generated once in BMO\u2019s real voice, downsampled, and baked as 4-bit ADPCM into firmware; generated replies stream to avoid storing large audio.',
   },
   {
     title: 'Memory core',
-    body: 'A GBrain-inspired idea helps BMO remember useful facts, recent moments, and preferences.',
+    body: 'A gbrain-inspired layer gives BMO short-term conversation continuity plus a durable, self-updating profile of the child.',
     owner: 'Brain service + Supabase memory',
     visible:
-      'Replies can feel continuous because BMO can recall what matters before answering.',
+      'Follow-ups make sense (apple \u2192 \u201cred\u201d stays on topic), and BMO remembers the child\u2019s name \u2014 learned, never hardcoded, newest value wins.',
     implementation:
-      'The brain layer recalls durable context before a response and can enrich memory after successful exchanges.',
+      'Recent turns are replayed as chat history; stable facts are upserted by key and recalled by vector similarity before each reply. Fully degradable.',
   },
   {
     title: 'Secure cloud bridge',
@@ -176,8 +187,8 @@ export const COMPONENTS = [
     role: 'Listening Sprout',
     why: 'Makes the listening state real and gives the firmware a voice-input path.',
     needed: 'INMP441 I2S microphone',
-    connection: 'Shares the ESP32-C3 I2S clock path; data pin follows the live firmware pin map.',
-    note: 'Used when hold-to-talk captures audio for the brain route.',
+    connection: 'Shares the ESP32-C3 I2S clock (GP0/GP1); data (SD) on GP5.',
+    note: 'SD must avoid strapping pins GP8/GP9, or capture reads as silence.',
   },
   {
     name: 'I2S amp + speaker',
@@ -257,3 +268,124 @@ export const ORGAN_MAP = [
     y: '79%',
   },
 ] as const satisfies readonly OrganMapItem[];
+
+/** One stage of the voice round-trip, for the wiki deep-dive. */
+export interface VoiceStage {
+  step: string;
+  title: string;
+  body: string;
+  detail: string;
+}
+
+/**
+ * The full hold-to-talk voice pipeline, stage by stage. Used by the wiki to
+ * explain in detail how a spoken question becomes a spoken answer.
+ */
+export const VOICE_PIPELINE = [
+  {
+    step: 'Capture',
+    title: 'Hold to talk',
+    body: 'A long press (about half a second) starts a walkie-talkie recording that runs until you let go, capped near two seconds by the chip memory the secure connection also needs.',
+    detail: 'INMP441 mic, 16 kHz mono PCM, recorded straight into the request buffer with no extra copies.',
+  },
+  {
+    step: 'Auto-gain',
+    title: 'Make it loud enough',
+    body: 'The mic records very quietly, so the firmware measures the loudest sample and scales the whole clip up before sending. Quiet trailing words survive instead of getting dropped.',
+    detail: 'Peak-normalize toward ~67% full-scale, gain capped at 48x. Without it, speech-to-text loses the end of sentences.',
+  },
+  {
+    step: 'Send',
+    title: 'One authenticated POST',
+    body: 'The clip is wrapped as a WAV and posted to the brain route with the device fingerprint header. No account login lives on the device — only the rotatable fingerprint.',
+    detail: 'multipart/form-data to /api/brain, X-BMO-Fingerprint header; the server stores only the hash.',
+  },
+  {
+    step: 'Understand',
+    title: 'Speech to text to thought',
+    body: 'The cloud transcribes the audio, recalls relevant memory and recent turns, and asks the language model for a short in-character reply.',
+    detail: 'STT then LLM with the soul prompt, child profile, recent conversation, and semantic recall folded in.',
+  },
+  {
+    step: 'Speak',
+    title: 'Read the reply verbatim',
+    body: 'The reply text is sent to an audio model that must read it exactly as written — wrapped as a script so it can never improvise a different answer than the one shown in the activity log.',
+    detail: 'gpt-audio model, verbatim-wrapped user text + narration-only direction. Streamed PCM16 back to the device.',
+  },
+  {
+    step: 'Play & lip-sync',
+    title: 'Mouth follows the voice',
+    body: 'Audio streams to the speaker chunk by chunk while a loudness meter drives the mouth, so BMO looks like it is really speaking instead of playing a sound over a frozen face.',
+    detail: 'Downsample 24 to 16 kHz to I2S; a fast-attack envelope feeds the talking-mouth animation.',
+  },
+] as const satisfies readonly VoiceStage[];
+
+/**
+ * The gbrain-shaped brain layer BMO actually ships, mapped to the real
+ * TypeScript modules that implement each idea. These are working code backed
+ * by Supabase tables + RPCs, not inert markdown skill files — gbrain's skills
+ * are recipes for an autonomous agent; BMO ports the load-bearing ideas as
+ * functions on its own stack (Supabase pgvector + OpenRouter).
+ */
+export const BRAIN_CAPABILITIES = [
+  {
+    gbrain: 'capture + brain-first recall',
+    title: 'Persistent memory',
+    body: 'Every exchange is embedded and written down, then recalled by meaning before BMO answers — so follow-ups stay on topic and the brain grows the more BMO is used.',
+    module: 'lib/brain.ts · match_brain_memory',
+  },
+  {
+    gbrain: 'think (synthesis + gap analysis)',
+    title: 'Reasoned recall',
+    body: 'Beyond fetching memories, BMO can compose a single cited answer and honestly flag what it does not know yet.',
+    module: 'lib/brain/synthesize.ts',
+  },
+  {
+    gbrain: 'self-wiring knowledge graph + enrich',
+    title: 'Connected memories',
+    body: 'People, places, and topics become entities with typed links, so BMO can reach facts that plain similarity search misses.',
+    module: 'lib/brain/graph.ts · entities.ts',
+  },
+  {
+    gbrain: 'enrich the entity over time',
+    title: 'Child profile',
+    body: 'Durable facts about the child (name, favorites, fears) are distilled from conversations and updated in place — learned, never hardcoded, newest value wins.',
+    module: 'lib/brain/profile.ts',
+  },
+  {
+    gbrain: 'salience + dedup',
+    title: 'Importance & tidy-up',
+    body: 'Memories are scored for importance and near-duplicates are found, so what matters is kept and clutter is pruned.',
+    module: 'lib/brain/salience.ts',
+  },
+  {
+    gbrain: '24/7 dream cycle (maintain)',
+    title: 'Dream cycle',
+    body: 'A scheduled offline pass consolidates, de-duplicates, and re-scores memory so recall quality improves over time with no human in the loop.',
+    module: 'lib/brain/consolidate.ts · /api/brain/dream',
+  },
+  {
+    gbrain: 'find_trajectory / timeline',
+    title: 'Timeline',
+    body: 'A temporal view of memory — what happened, in what order, and how a topic evolved across time.',
+    module: 'lib/brain/timeline.ts',
+  },
+  {
+    gbrain: 'hybrid search',
+    title: 'Hybrid search',
+    body: 'Vector similarity and keyword search are fused with reciprocal-rank fusion for results that beat either signal alone.',
+    module: 'lib/brain/search.ts',
+  },
+  {
+    gbrain: 'gbrain doctor / skillpack-check',
+    title: 'Brain health',
+    body: 'Built-in checks (table reachable, memories present, embeddings present, recall working) roll up into a single health score.',
+    module: 'lib/brain/doctor.ts',
+  },
+  {
+    gbrain: 'dream-cycle idea, applied to a toy',
+    title: 'Random thoughts',
+    body: 'When played with, BMO thinks out loud on its own: it recalls what it knows, muses one short line in its own voice, speaks it, and remembers the thought — a self-feeding inner life. gbrain has no named skill for this; it is their dream-cycle idea made spontaneous.',
+    module: 'lib/thoughts.ts · /api/brain/idle-thought',
+  },
+] as const satisfies readonly BrainCapability[];

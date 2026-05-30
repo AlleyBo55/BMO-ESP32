@@ -44,7 +44,25 @@ constexpr uint32_t MIC_SAMPLE_RATE_HZ = 16000;
 // so micSetChannel() can flip this at runtime to find the one with signal.
 i2s_channel_fmt_t s_micChannel = I2S_CHANNEL_FMT_ONLY_LEFT;
 
+// Software decimation factor applied during capture. The I2S hardware always
+// runs at MIC_SAMPLE_RATE_HZ (16 kHz, shared with the speaker — we never
+// re-clock it). With factor N we keep every Nth sample, yielding an effective
+// 16000/N Hz capture. factor 2 → 8 kHz, which lets a fixed-size buffer hold
+// TWICE the seconds of speech (telephone quality, still great for STT). The
+// caller must write a WAV header whose rate matches micEffectiveRate().
+uint8_t s_decimation = 1;
+
 }  // namespace
+
+// Effective capture sample rate after decimation. The WAV header sent to STT
+// must use this, not the raw 16 kHz I2S rate.
+uint32_t micEffectiveRate() {
+  return MIC_SAMPLE_RATE_HZ / (s_decimation < 1 ? 1 : s_decimation);
+}
+
+void micSetDecimation(uint8_t factor) {
+  s_decimation = factor < 1 ? 1 : factor;
+}
 
 // Installs the shared duplex I2S driver with the current s_micChannel.
 static bool installMicDriver() {
@@ -99,33 +117,60 @@ bool micSetChannel(bool right) {
 }
 
 // INMP441 capture. The mic shares the single I2S peripheral with the speaker,
-// installed at 16-bit by micBegin(). We read 16-bit frames directly.
-// `keepGoing` lets the caller stop early (e.g. on touch release).
+// installed at 16-bit by micBegin(). We read 16-bit frames and keep every
+// s_decimation-th sample, so `dest` ends up holding micEffectiveRate() audio.
+// `maxSamples` is counted in OUTPUT (post-decimation) samples, i.e. the
+// destination buffer capacity. `keepGoing` lets the caller stop early.
 size_t micCapture(int16_t* dest, size_t maxSamples, bool (*keepGoing)()) {
   if (dest == nullptr || maxSamples == 0) return 0;
 
-  size_t totalSamples = 0;
+  const uint8_t dec = s_decimation < 1 ? 1 : s_decimation;
 
-  while (totalSamples < maxSamples) {
+  // Fast path: no decimation → read straight into dest (original behavior).
+  if (dec == 1) {
+    size_t totalSamples = 0;
+    while (totalSamples < maxSamples) {
+      if (keepGoing != nullptr && !keepGoing()) break;
+      const size_t want = (maxSamples - totalSamples) * sizeof(int16_t);
+      size_t read = 0;
+      esp_err_t err = i2s_read(MIC_I2S_PORT, dest + totalSamples, want, &read,
+                               50 / portTICK_PERIOD_MS);
+      if (err != ESP_OK) {
+        Serial.printf("[mic] i2s_read failed: %d\n", static_cast<int>(err));
+        break;
+      }
+      if (read == 0) continue;
+      totalSamples += read / sizeof(int16_t);
+    }
+    return totalSamples;
+  }
+
+  // Decimated path: pull raw 16 kHz frames into a scratch block, keep every
+  // dec-th one. A running phase carries the keep position across reads so the
+  // stride stays correct at block boundaries.
+  static int16_t scratch[512];
+  size_t outCount = 0;
+  uint32_t phase = 0;  // counts raw samples; keep when phase % dec == 0
+
+  while (outCount < maxSamples) {
     if (keepGoing != nullptr && !keepGoing()) break;
 
-    const size_t want =
-        (maxSamples - totalSamples) * sizeof(int16_t);
-
     size_t read = 0;
-    esp_err_t err = i2s_read(MIC_I2S_PORT,
-                             dest + totalSamples,
-                             want,
-                             &read,
+    esp_err_t err = i2s_read(MIC_I2S_PORT, scratch, sizeof(scratch), &read,
                              50 / portTICK_PERIOD_MS);
     if (err != ESP_OK) {
       Serial.printf("[mic] i2s_read failed: %d\n", static_cast<int>(err));
       break;
     }
-    if (read == 0) continue;
-    totalSamples += read / sizeof(int16_t);
+    const size_t got = read / sizeof(int16_t);
+    if (got == 0) continue;
+
+    for (size_t i = 0; i < got && outCount < maxSamples; ++i) {
+      if (phase == 0) dest[outCount++] = scratch[i];
+      if (++phase >= dec) phase = 0;
+    }
   }
-  return totalSamples;
+  return outCount;
 }
 
 }  // namespace bmo

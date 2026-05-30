@@ -666,8 +666,66 @@
   padding: 100px 0 120px;
 }
 
-.repoPanel {
+.brainGrid {
+  grid-column: 1 / -1;
   display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 8px;
+}
+
+.brainCard {
+  border: 3px solid #10251f;
+  border-radius: 12px;
+  background: #fffdf0;
+  box-shadow: 0 6px 0 rgba(16, 37, 31, 0.18);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+.brainCard > span {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  border: 2px solid #0f6f61;
+  border-radius: 999px;
+  padding: 4px 12px;
+  color: #0f6f61;
+  font-size: 0.72rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.brainCard h3 {
+  margin: 14px 0 0;
+  color: #10251f;
+  font-size: 1.25rem;
+}
+
+.brainCard p {
+  margin: 10px 0 0;
+  color: rgba(17, 37, 31, 0.74);
+  line-height: 1.5;
+  flex: 1;
+}
+
+.brainCard code {
+  margin-top: 16px;
+  display: block;
+  border-top: 2px solid rgba(16, 37, 31, 0.16);
+  padding-top: 12px;
+  color: #0f6f61;
+  font-size: 0.8rem;
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.repoPanel {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -1184,6 +1242,14 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .brainGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .repoPanel {
+    grid-template-columns: 1fr;
+  }
+
   .componentRow {
     gap: 10px;
   }
@@ -1295,6 +1361,10 @@
   }
 
   .featureGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .brainGrid {
     grid-template-columns: 1fr;
   }
 
