@@ -1,0 +1,3 @@
+# Real secrets — generated/local only, never commit.
+.env
+include/secrets.h

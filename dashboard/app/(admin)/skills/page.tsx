@@ -55,6 +55,12 @@ const SKILLS: ReadonlyArray<SkillMeta> = [
     label: 'Play pretend',
     description: 'Invent and run small imaginary games together.',
   },
+  {
+    name: 'memory',
+    label: 'Memory (brain)',
+    description:
+      'Remember past conversations and recall them before answering. The brain grows the more BMO is used.',
+  },
 ];
 
 function paramsToJson(state: SkillState): string {

@@ -6,5 +6,11 @@
     "deploymentEnabled": {
       "master": true
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/brain/dream",
+      "schedule": "0 3 * * *"
+    }
+  ]
 }

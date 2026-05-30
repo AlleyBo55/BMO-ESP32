@@ -27,9 +27,10 @@ const TIMEOUT_CHAT_MS = 60_000;
 const TIMEOUT_STT_MS = 30_000;
 const TIMEOUT_TTS_CHUNK_MS = 30_000;
 const TIMEOUT_CREDITS_MS = 10_000;
+const TIMEOUT_EMBEDDING_MS = 15_000;
 
 /** Stage labels mirror the activity-log error_stage enum, plus credits. */
-export type OpenRouterStage = 'stt' | 'llm' | 'tts' | 'credits';
+export type OpenRouterStage = 'stt' | 'llm' | 'tts' | 'credits' | 'embedding';
 
 /**
  * Thrown for every OpenRouter failure (HTTP non-2xx, parse failure, timeout).
@@ -68,7 +69,7 @@ export interface ChatRequest {
    * is provider-specific; OpenAI defaults to "auto", which is what we want.
    */
   toolChoice?: 'auto' | 'none' | 'required';
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 /** A single tool invocation produced by the LLM. */
@@ -95,7 +96,7 @@ export interface TranscribeRequest {
   format: 'wav' | 'mp3' | 'flac';
   model: string;
   language?: string;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 export interface TranscribeResponse {
@@ -109,7 +110,7 @@ export interface SynthesizeStreamRequest {
   voice: string;
   text: string;
   systemPrompt?: string;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 export interface CreditsResponse {
@@ -558,4 +559,102 @@ export async function fetchCredits(): Promise<CreditsResponse> {
     currency: 'USD',
     fetchedAt: Date.now(),
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* embeddings                                                                  */
+/* -------------------------------------------------------------------------- */
+
+export interface EmbedRequest {
+  /** Embedding model id, e.g. `openai/text-embedding-3-small`. */
+  model: string;
+  /** One or more strings to embed. */
+  input: string | string[];
+  /**
+   * Optional output dimensionality. For `text-embedding-3-*` models this
+   * truncates the vector to the requested size; it MUST match the column
+   * width in `brain_memory` (1536).
+   */
+  dimensions?: number;
+  signal?: AbortSignal | undefined;
+}
+
+export interface EmbedResponse {
+  /** One embedding per input string, in input order. */
+  embeddings: number[][];
+  costUsd?: number;
+}
+
+/**
+ * Generates embeddings via OpenRouter's OpenAI-compatible `/embeddings`
+ * endpoint. Throws {@link OpenRouterError} (stage `'embedding'`) on any
+ * non-2xx response, transport error, abort, or 15s timeout.
+ *
+ * Used by the brain memory layer (`lib/brain.ts`) for semantic recall and
+ * capture. Kept here so OpenRouter remains the single egress point.
+ */
+export async function embed(req: EmbedRequest): Promise<EmbedResponse> {
+  const timed = makeTimedSignal(TIMEOUT_EMBEDDING_MS, req.signal);
+  const body: Record<string, unknown> = {
+    model: req.model,
+    input: req.input,
+  };
+  if (req.dimensions !== undefined) {
+    body.dimensions = req.dimensions;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${OPENROUTER_BASE_URL}/embeddings`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(body),
+      signal: timed.signal,
+    });
+  } catch (err) {
+    timed.cancel();
+    throw abortToError(err, 'embedding');
+  }
+
+  if (!response.ok) {
+    const msg = await readErrorMessage(response);
+    timed.cancel();
+    throw new OpenRouterError('embedding', response.status, msg);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = await response.json();
+  } catch (err) {
+    timed.cancel();
+    throw abortToError(err, 'embedding');
+  }
+  timed.cancel();
+
+  if (!isRecord(parsed) || !Array.isArray(parsed.data)) {
+    throw new OpenRouterError('embedding', response.status, 'response missing "data" array');
+  }
+
+  const embeddings: number[][] = [];
+  for (const item of parsed.data) {
+    if (!isRecord(item) || !Array.isArray(item.embedding)) {
+      throw new OpenRouterError('embedding', response.status, 'data item missing "embedding"');
+    }
+    const vec = item.embedding.filter((n): n is number => typeof n === 'number');
+    if (vec.length === 0) {
+      throw new OpenRouterError('embedding', response.status, 'embedding vector was empty');
+    }
+    embeddings.push(vec);
+  }
+  if (embeddings.length === 0) {
+    throw new OpenRouterError('embedding', response.status, 'no embeddings returned');
+  }
+
+  const out: EmbedResponse = { embeddings };
+  const usage = parsed.usage;
+  if (isRecord(usage)) {
+    if (typeof usage.total_cost === 'number') out.costUsd = usage.total_cost;
+    else if (typeof usage.cost === 'number') out.costUsd = usage.cost;
+  }
+  return out;
 }

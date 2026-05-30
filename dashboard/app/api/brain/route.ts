@@ -2,9 +2,12 @@ import 'server-only';
 
 import { Buffer } from 'node:buffer';
 
+import { after } from 'next/server';
+
 import { verifyFingerprint } from '@/app/api/_lib/fingerprint-guard';
 import { writeActivityLog, type ActivityLogRow } from '@/app/api/_lib/log';
 import { transcodeUrlToPcm16, AudioTranscodeError } from '@/lib/audio-transcode';
+import { captureExchange, formatRecallForPrompt, recall } from '@/lib/brain';
 import { getConfig } from '@/lib/config';
 import {
   chat,
@@ -15,6 +18,8 @@ import {
 } from '@/lib/openrouter';
 import { findSongByTitle, listSongs } from '@/lib/songs';
 import type { BmoConfig, Song } from '@/lib/types';
+import { BMO_VOICE_DIRECTION } from '@/lib/voice';
+import { applyRadioFx } from '@/lib/voice-fx';
 import { buildWavHeader } from '@/lib/wav';
 
 /**
@@ -320,6 +325,7 @@ export async function POST(req: Request): Promise<Response> {
   let modelTts: string | null = null;
   let replyText: string;
   let songToPlay: Song | null = null;
+  let memoryEnabled = false;
 
   try {
     cfg = await getConfig();
@@ -343,10 +349,32 @@ export async function POST(req: Request): Promise<Response> {
       }
     }
 
+    // Brain-first lookup (gbrain pattern): before BMO answers, recall what
+    // it already knows that's relevant to this turn, and fold it into the
+    // system prompt. Gated on the `memory` skill. Fully degradable: recall()
+    // returns [] on any failure, so the brain never blocks a reply.
+    let memoryBlock = '';
+    const memorySkill = cfg.skills.memory;
+    if (memorySkill !== undefined && memorySkill.enabled) {
+      memoryEnabled = true;
+      const [memories, profileLine] = await Promise.all([
+        recall(transcriptText, { signal: ac.signal }),
+        // The durable child profile (gbrain "enrich the entity over time").
+        // Best-effort: degrades to '' if the profile module/table is absent.
+        import('@/lib/brain/profile')
+          .then((m) => m.profileSummary())
+          .catch(() => ''),
+      ]);
+      memoryBlock = formatRecallForPrompt(memories);
+      if (profileLine.length > 0) {
+        memoryBlock += `\n\n[CHILD PROFILE]\n${profileLine}\n[/CHILD PROFILE]`;
+      }
+    }
+
     try {
       const reply = await chat({
         model: cfg.llm_model,
-        systemPrompt: buildSystemPrompt(cfg.soul_md),
+        systemPrompt: buildSystemPrompt(cfg.soul_md) + memoryBlock,
         messages: [{ role: 'user', content: transcriptText }],
         tools: buildTools(cfg, songs),
         signal: ac.signal,
@@ -487,6 +515,16 @@ export async function POST(req: Request): Promise<Response> {
       } catch {
         /* swallow */
       }
+
+      // Auto-grow the brain for song requests too: remember what was asked
+      // for and that BMO played it. Degradable; runs after the response.
+      if (status === 'ok' && memoryEnabled) {
+        const songTitle = songSelected.title;
+        const askedText = transcriptText;
+        after(async () => {
+          await captureExchange(askedText, `Memutar lagu "${songTitle}".`);
+        });
+      }
     };
 
     const songStream = new ReadableStream<Uint8Array>({
@@ -550,12 +588,15 @@ export async function POST(req: Request): Promise<Response> {
   // ------------------- open TTS stream eagerly ------------------------------
   let iterator: AsyncIterator<Buffer>;
   try {
-    const it = synthesizeStream({
-      model: cfg.tts_model,
-      voice: cfg.tts_voice,
-      text: replyText,
-      signal: ac.signal,
-    });
+    const it = applyRadioFx(
+      synthesizeStream({
+        model: cfg.tts_model,
+        voice: cfg.tts_voice,
+        text: replyText,
+        systemPrompt: BMO_VOICE_DIRECTION,
+        signal: ac.signal,
+      }),
+    );
     iterator = it[Symbol.asyncIterator]();
   } catch (err) {
     clearTimeout(budgetTimer);
@@ -630,6 +671,16 @@ export async function POST(req: Request): Promise<Response> {
       await writeActivityLog(row);
     } catch {
       /* swallow */
+    }
+
+    // Auto-grow the brain (gbrain pattern): on a successful exchange, write
+    // the turn to memory so future calls can recall it. Runs via `after()`
+    // so it never delays the audio response and survives the serverless
+    // freeze. Capture is fully degradable and never throws.
+    if (status === 'ok' && memoryEnabled) {
+      after(async () => {
+        await captureExchange(finalTranscript, finalReply);
+      });
     }
   };
 

@@ -15,6 +15,10 @@
 #include <math.h>
 #include <driver/i2s.h>
 #include "audio_clips.h"
+#include "bmo_brain_client.h"
+#include "bmo_mic.h"
+#include "bmo_provisioning.h"
+#include "bmo_wav.h"
 
 // -----------------------------------------------------------------------------
 // Pin map
@@ -38,6 +42,7 @@ enum TouchKind : int;
 extern volatile bool      g_touchPending;
 extern volatile TouchKind g_pendingKind;
 static void pollTouch();
+static void askBrain();
 
 // -----------------------------------------------------------------------------
 // Panel geometry
@@ -50,25 +55,27 @@ static constexpr int Y_OFFSET = 0;
 // -----------------------------------------------------------------------------
 // BMO palette (RGB565)
 //
-// All moods share the same BMO-blue background for visual consistency.
+// All moods share the same pale BMO screen background for visual consistency.
 // `bgOverride` field is kept in FaceState for ad-hoc tints, but the built-in
 // moods don't use it — moods that want to communicate temperature/sickness
 // do it through icons (snowflakes, steam, sweat) layered on top of the
-// standard BMO blue.
+// standard BMO face color.
 // -----------------------------------------------------------------------------
-static constexpr uint16_t C_BG       = 0x1AD3;  // dark BMO teal-blue (~#163B7A blend)
+static constexpr uint16_t C_BG       = 0xCF3A;  // sampled BMO screen mint (~#CCE4D7)
 static constexpr uint16_t C_BG_COLD  = C_BG;
 static constexpr uint16_t C_BG_HOT   = C_BG;
 static constexpr uint16_t C_BG_SICK  = C_BG;
 static constexpr uint16_t C_INK      = 0x0000;
+static constexpr uint16_t C_MOUTH    = 0x3AA7;  // sampled dark green mouth fill (~#3B5638)
 static constexpr uint16_t C_SHINE    = 0xFFFF;
-static constexpr uint16_t C_BLUSH    = 0xFCD3;
-static constexpr uint16_t C_HEART    = 0xF81F;
-static constexpr uint16_t C_STAR     = 0xFFE0;
-static constexpr uint16_t C_TEAR     = 0x6E5F;
-static constexpr uint16_t C_SWEAT    = 0xC65F;
-static constexpr uint16_t C_TONGUE   = 0xF992;
+static constexpr uint16_t C_BLUSH    = 0xFCD5;
+static constexpr uint16_t C_HEART    = 0xFB54;
+static constexpr uint16_t C_STAR     = 0xFF6C;
+static constexpr uint16_t C_TEAR     = 0x76FF;
+static constexpr uint16_t C_SWEAT    = 0x7EFF;
+static constexpr uint16_t C_TONGUE   = 0xB593;  // sampled muted lower mouth/tongue (~#B0B19D)
 static constexpr uint16_t C_BROW     = 0x0000;
+static uint16_t g_frameBg = C_BG;
 
 // -----------------------------------------------------------------------------
 // Hardware SPI
@@ -267,29 +274,27 @@ static void fbDrawBrow(int cx, int cy, int width, int slope, int thickness,
 
 static void fbDrawEye(int cx, int cy, int w, int h, float lid, int dx, int dy) {
   int top  = cy - h / 2;
-  int left = cx - w / 2;
-  int r    = (w < h ? w : h) / 2;
-  if (r > 6) r = 6;
+  int rx   = w / 2;
+  int ry   = h / 2;
 
   if (lid >= 0.95f) {
     fbDrawFlatMouth(cx, cy, w + 2, 2, C_INK);
     return;
   }
 
-  fbFillRoundRect(left, top, w, h, r, C_INK);
+  fbFillEllipse(cx, cy, rx, ry, C_INK);
 
   if (lid > 0) {
     int lidH = (int)((h - 2) * lid);
-    fbRect(left - 1, top - 1, w + 2, lidH + 2, C_BG);
+    fbRect(cx - rx - 1, top - 1, w + 2, lidH + 2, g_frameBg);
   }
 
-  int shineY = cy + dy - 5;
-  int shineX = cx + dx + 3;
-  if (shineY > top + (int)((h) * lid) + 1) {
-    fbRect(shineX,     shineY,     3, 3, C_SHINE);
-    fbRect(shineX - 1, shineY + 1, 1, 1, C_SHINE);
-    fbRect(shineX + 3, shineY + 1, 1, 1, C_SHINE);
-  }
+  (void)dx;
+  (void)dy;
+}
+
+static void fbDrawCrescentEye(int cx, int cy, int width, uint16_t c) {
+  fbDrawSmile(cx, cy - 4, width, 4, 2, 1, c);
 }
 
 // Heart-shaped eye for LOVE mood.
@@ -332,7 +337,46 @@ static void fbDrawSweat(int cx, int cy, int yPx) {
   fbFillCircle(cx + 1, y - 1, 1, C_SHINE);
 }
 
-// Tongue / drool: a soft pink tear-shape sticking out of the mouth.
+// Soft cheek bloom with a few BMO-like blush hatches.
+static void fbDrawBlush(int cx, int cy, float amount) {
+  int r = 3 + (int)(2 * amount);
+  fbFillEllipse(cx, cy, r + 1, r, C_BLUSH);
+  if (amount < 0.65f) return;
+  fbLine(cx - 4, cy + 2, cx - 2, cy - 2, 1, C_HEART);
+  fbLine(cx,     cy + 2, cx + 2, cy - 2, 1, C_HEART);
+  fbLine(cx + 4, cy + 1, cx + 5, cy - 1, 1, C_HEART);
+}
+
+static void fbDrawBmoMouth(int cx, int cy, int w, int h, bool tooth, bool tongue) {
+  if (w < 10) w = 10;
+  if (h < 8) h = 8;
+  int rx = w / 2;
+  int ry = h / 2;
+
+  fbFillEllipse(cx, cy, rx + 2, ry + 2, C_INK);
+  fbFillEllipse(cx, cy, rx, ry, C_MOUTH);
+
+  if (tongue && h >= 12) {
+    int tongueRx = rx - 5;
+    int tongueRy = ry / 3;
+    if (tongueRx < 3) tongueRx = 3;
+    if (tongueRy < 2) tongueRy = 2;
+    fbFillEllipse(cx + 1, cy + ry - 3, tongueRx, tongueRy, C_TONGUE);
+    fbHLine(cx - tongueRx + 1, cy + ry - 4, tongueRx * 2 - 2, C_INK);
+  }
+
+  if (tooth && w >= 18) {
+    int toothRx = rx - 5;
+    if (toothRx < 4) toothRx = 4;
+    fbFillEllipse(cx, cy - ry + 5, toothRx, 3, C_SHINE);
+  }
+}
+
+static void fbDrawOpenMouth(int cx, int cy, int rx, int ry, bool tongue) {
+  fbDrawBmoMouth(cx, cy, rx * 2, ry * 2, rx > 10 && ry > 6, tongue);
+}
+
+// Tongue / drool: a muted lower-mouth color, matching the BMO reference.
 static void fbDrawDrool(int cx, int cy, int len) {
   fbFillEllipse(cx, cy + len / 2, 3, len / 2 + 2, C_TONGUE);
 }
@@ -340,7 +384,7 @@ static void fbDrawDrool(int cx, int cy, int len) {
 // Tongue out (hungry): flat pink bar dangling from a small open mouth.
 static void fbDrawTongueOut(int cx, int cy) {
   // small mouth above
-  fbFillEllipse(cx, cy - 4, 9, 4, C_INK);
+  fbDrawBmoMouth(cx, cy - 4, 18, 10, true, false);
   // tongue protruding down
   fbFillRoundRect(cx - 5, cy - 2, 10, 10, 4, C_TONGUE);
   // shine on tongue
@@ -370,7 +414,7 @@ static void fbDrawSteam(int cx, int cy, int phase, uint16_t c) {
 static void fbDrawQuestion(int cx, int cy, uint16_t c) {
   // top hook (top part of '?')
   fbFillCircle(cx, cy - 4, 4, c);
-  fbFillCircle(cx, cy - 4, 2, C_BG);
+  fbFillCircle(cx, cy - 4, 2, g_frameBg);
   // tail
   fbFillRoundRect(cx, cy - 2, 2, 4, 1, c);
   // dot
@@ -417,7 +461,8 @@ static void fbDrawZigzag(int cx, int cy, int width, int amp, int thickness,
 
 // Teeth chatter: alternating short vertical stripes inside a flat mouth box.
 static void fbDrawChatter(int cx, int cy, uint32_t now) {
-  fbFillRoundRect(cx - 18, cy - 5, 36, 10, 3, C_INK);
+  fbFillRoundRect(cx - 20, cy - 7, 40, 14, 5, C_INK);
+  fbFillRoundRect(cx - 18, cy - 5, 36, 10, 3, C_MOUTH);
   // alternating white teeth bars
   bool odd = ((now / 80) & 1) == 0;
   for (int i = -3; i <= 3; ++i) {
@@ -432,9 +477,7 @@ static void fbDrawChatter(int cx, int cy, uint32_t now) {
 static void fbDrawLaugh(int cx, int cy, float openness, uint32_t now) {
   int rx = 14;
   int ry = 5 + (int)(8 * openness);
-  fbFillEllipse(cx, cy, rx, ry, C_INK);
-  // Tongue stripe inside
-  fbFillRoundRect(cx - 6, cy + ry / 2, 12, 3, 1, C_TONGUE);
+  fbDrawBmoMouth(cx, cy, rx * 2, ry * 2, true, true);
   // Ripple side-marks for "haha" emphasis
   int t = (int)(now / 80) % 6;
   fbDrawZ(cx - 28, cy - 6 - t, 2, C_INK);
@@ -499,6 +542,7 @@ struct FaceState {
     EYE_DOT,           // tiny dot eyes for confused/bored
     EYE_SHADES,        // sunglasses bar over the eyes
     EYE_SQUINT,        // narrow horizontal slit (focused)
+    EYE_CRESCENT,      // BMO's closed happy/laugh eye arcs
   } eyeShape = EYE_NORMAL;
 
   // Eyebrows
@@ -515,6 +559,9 @@ struct FaceState {
     M_LAUGH,             // wide open + laugh ripples
   } mouth = M_SMILE;
   float mouthOpen = 0;
+  int smileWidth = 46;
+  int smileDip = 8;
+  int flatWidth = 38;
 
   // Cheeks
   float blush = 0;
@@ -527,6 +574,8 @@ struct FaceState {
   bool starsVisible = false;
   bool heartsAround = false;
   bool questionMarks = false;      // confused
+  bool listeningMarks = false;     // listening / voice input
+  bool thinkingDots = false;       // thinking / processing
   bool snowFlakes = false;         // cold
   bool steamLines = false;         // hot
   bool zzzLetters = false;         // bored / sleepy
@@ -543,16 +592,39 @@ struct FaceState {
 };
 
 // Eye + mouth coords
-static constexpr int EYE_W = 18;
-static constexpr int EYE_H = 30;
-static constexpr int EYE_Y = 50;
-static constexpr int EYE_DX = 30;
-static constexpr int MOUTH_Y  = 92;
+static constexpr int EYE_W = 8;
+static constexpr int EYE_H = 8;
+static constexpr int EYE_Y = 48;
+static constexpr int EYE_DX = 46;
+static constexpr int MOUTH_Y  = 80;
 static constexpr int MOUTH_CX = TFT_W / 2;
 
-static void renderFrame(const FaceState &s, uint32_t now) {
+static void fbDrawListeningMarks(uint32_t now) {
+  int phase = (int)((now / 120) % 3);
+  for (int i = 0; i < 3; ++i) {
+    int h = 3 + ((phase + i) % 3) * 2;
+    int y = MOUTH_Y - h / 2 + (int)(1 * sinf(now * 0.005f + i));
+    int leftX = 20 + i * 5;
+    int rightX = TFT_W - 23 - i * 5;
+    fbFillRoundRect(leftX, y, 3, h, 1, C_MOUTH);
+    fbFillRoundRect(rightX, y, 3, h, 1, C_MOUTH);
+  }
+}
+
+static void fbDrawThinkingDots(uint32_t now) {
+  int phase = (int)((now / 240) % 3);
+  static const int xs[3] = { MOUTH_CX + 20, MOUTH_CX + 30, MOUTH_CX + 42 };
+  static const int ys[3] = { EYE_Y - 14,   EYE_Y - 20,   EYE_Y - 17 };
+  for (int i = 0; i < 3; ++i) {
+    int r = 2 + (((phase + i) % 3) == 0 ? 1 : 0);
+    fbFillCircle(xs[i], ys[i], r, C_MOUTH);
+  }
+}
+
+static void drawFaceToBuffer(const FaceState &s, uint32_t now) {
   // Background — moods can override (cold/hot/sick)
   uint16_t bg = s.bgOverride ? s.bgOverride : C_BG;
+  g_frameBg = bg;
   fbFill(bg);
 
   int leftCx  = MOUTH_CX - EYE_DX + s.shakeX;
@@ -561,16 +633,15 @@ static void renderFrame(const FaceState &s, uint32_t now) {
 
   // Cheeks
   if (s.blush > 0) {
-    int r = 5 + (int)(2 * s.blush);
-    fbFillEllipse(20,         eyeY + 20, r + 1, r, C_BLUSH);
-    fbFillEllipse(TFT_W - 20, eyeY + 20, r + 1, r, C_BLUSH);
+    fbDrawBlush(leftCx - 18,  eyeY + 18, s.blush);
+    fbDrawBlush(rightCx + 18, eyeY + 18, s.blush);
   }
 
   // Eyes
   switch (s.eyeShape) {
     case FaceState::EYE_NORMAL:
-      fbDrawEye(leftCx,  eyeY, EYE_W, EYE_H, s.lidL, s.pupilDx, s.pupilDy);
-      fbDrawEye(rightCx, eyeY, EYE_W, EYE_H, s.lidR, s.pupilDx, s.pupilDy);
+      fbDrawEye(leftCx + s.pupilDx,  eyeY + s.pupilDy, EYE_W, EYE_H, s.lidL, 0, 0);
+      fbDrawEye(rightCx + s.pupilDx, eyeY + s.pupilDy, EYE_W, EYE_H, s.lidR, 0, 0);
       break;
     case FaceState::EYE_HEART:
       fbDrawHeartEye(leftCx,  eyeY, 7, C_HEART);
@@ -620,6 +691,10 @@ static void renderFrame(const FaceState &s, uint32_t now) {
       fbFillCircle(rightCx + s.pupilDx, eyeY + s.pupilDy, 1, C_SHINE);
       break;
     }
+    case FaceState::EYE_CRESCENT:
+      fbDrawCrescentEye(leftCx,  eyeY + 4, 16, C_INK);
+      fbDrawCrescentEye(rightCx, eyeY + 4, 16, C_INK);
+      break;
   }
 
   // Eyebrows
@@ -631,31 +706,40 @@ static void renderFrame(const FaceState &s, uint32_t now) {
   // Mouth
   switch (s.mouth) {
     case FaceState::M_SMILE:
-      fbDrawSmile(MOUTH_CX + s.shakeX, MOUTH_Y - 4 + s.shakeY, 56, 10, 4, 6, C_INK);
+      fbDrawSmile(MOUTH_CX + s.shakeX, MOUTH_Y - 4 + s.shakeY, s.smileWidth, s.smileDip, 3, 2, C_MOUTH);
       break;
     case FaceState::M_OPEN: {
       int rx = 10 + (int)(14 * s.mouthOpen);
       int ry = 4  + (int)(10 * s.mouthOpen);
-      fbFillEllipse(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, rx, ry, C_INK);
+      fbDrawOpenMouth(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, rx, ry, true);
       break;
     }
     case FaceState::M_FLAT:
-      fbDrawFlatMouth(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, 38, 4, C_INK);
+      fbDrawFlatMouth(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, s.flatWidth, 4, C_MOUTH);
       break;
     case FaceState::M_TALK: {
-      int rx = 14;
-      int ry = 3 + (int)(7 * s.mouthOpen);
-      fbFillEllipse(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, rx, ry, C_INK);
+      uint8_t talkPhase = (uint8_t)((now / 120) % 3);
+      switch (talkPhase) {
+        case 0:
+          fbDrawFlatMouth(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, 22, 3, C_MOUTH);
+          break;
+        case 1:
+          fbDrawOpenMouth(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, 8, 7, false);
+          break;
+        default:
+          fbDrawOpenMouth(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, 15, 7 + (int)(3 * s.mouthOpen), true);
+          break;
+      }
       break;
     }
     case FaceState::M_FROWN:
-      fbDrawFrown(MOUTH_CX + s.shakeX, MOUTH_Y + 4 + s.shakeY, 44, 8, 4, C_INK);
+      fbDrawFrown(MOUTH_CX + s.shakeX, MOUTH_Y + 4 + s.shakeY, 44, 8, 4, C_MOUTH);
       break;
     case FaceState::M_GRIN:
-      fbDrawSmile(MOUTH_CX + s.shakeX, MOUTH_Y - 4 + s.shakeY, 64, 14, 4, 10, C_INK);
+      fbDrawSmile(MOUTH_CX + s.shakeX, MOUTH_Y - 4 + s.shakeY, 56, 12, 4, 4, C_MOUTH);
       break;
     case FaceState::M_OH:
-      fbFillEllipse(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, 6, 8, C_INK);
+      fbDrawOpenMouth(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, 6, 8, false);
       break;
     case FaceState::M_TONGUE_OUT:
       fbDrawTongueOut(MOUTH_CX + s.shakeX, MOUTH_Y + 2 + s.shakeY);
@@ -663,13 +747,13 @@ static void renderFrame(const FaceState &s, uint32_t now) {
     case FaceState::M_DROOL: {
       // open mouth above + drool dripping below
       int ry = 4 + (int)(6 * s.mouthOpen);
-      fbFillEllipse(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, 12, ry, C_INK);
+      fbDrawBmoMouth(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, 24, ry * 2, true, false);
       int droolLen = 6 + (int)(6 * s.mouthOpen);
       fbDrawDrool(MOUTH_CX + s.shakeX - 2, MOUTH_Y + ry + 2, droolLen);
       break;
     }
     case FaceState::M_ZIGZAG:
-      fbDrawZigzag(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, 40, 4, 3, C_INK);
+      fbDrawZigzag(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, 40, 4, 3, C_MOUTH);
       break;
     case FaceState::M_CHATTER:
       fbDrawChatter(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, now);
@@ -713,6 +797,14 @@ static void renderFrame(const FaceState &s, uint32_t now) {
     fbDrawQuestion(132 - phase,      14, C_INK);
   }
 
+  if (s.listeningMarks) {
+    fbDrawListeningMarks(now);
+  }
+
+  if (s.thinkingDots) {
+    fbDrawThinkingDots(now);
+  }
+
   // Snowflakes (cold)
   if (s.snowFlakes) {
     int t = (int)(now / 100);
@@ -745,7 +837,29 @@ static void renderFrame(const FaceState &s, uint32_t now) {
     }
   }
 
+}
+
+static void renderFrame(const FaceState &s, uint32_t now) {
+  drawFaceToBuffer(s, now);
   flushFrame();
+}
+
+static void applyMoodTransition(FaceState &s, float t) {
+  float edge = 1.0f;
+  if (t < 0.12f) {
+    edge = t / 0.12f;
+  } else if (t > 0.88f) {
+    edge = (1.0f - t) / 0.12f;
+  }
+  if (edge >= 1.0f) return;
+  if (edge < 0.0f) edge = 0.0f;
+
+  float lid = (1.0f - edge) * 0.18f;
+  if (s.eyeShape == FaceState::EYE_NORMAL) {
+    if (s.lidL < lid) s.lidL = lid;
+    if (s.lidR < lid) s.lidR = lid;
+  }
+  s.shakeY += (int)((1.0f - edge) * 2.0f);
 }
 
 // -----------------------------------------------------------------------------
@@ -798,6 +912,95 @@ static void audioInit() {
   i2s_zero_dma_buffer(AUDIO_I2S_PORT);
 }
 
+// -----------------------------------------------------------------------------
+// Brain-stream sink (weak C symbols consumed by bmo_brain_client.cpp).
+//
+// The dashboard streams audio at 24 kHz mono PCM16; the speaker I²S TX is
+// configured at 16 kHz. We downsample 3:2 by skipping every 3rd input sample
+// and pass the result through `g_volume`. Quality is fine for speech and for
+// short songs; if you want full-fidelity playback later, switch I²S TX to
+// 24 kHz and update playTone/playClip's sample rate accordingly.
+//
+// `bmo_set_volume_from_dashboard()` is invoked by the brain client right
+// after parsing the response headers, propagating the dashboard slider.
+// -----------------------------------------------------------------------------
+
+extern "C" void bmo_set_volume_from_dashboard(int volume0to100) {
+  if (volume0to100 < 0)   volume0to100 = 0;
+  if (volume0to100 > 100) volume0to100 = 100;
+  // Save the dashboard's last-known volume so non-brain audio paths
+  // (jingles, synthesized voice) honour it too.
+  g_volume = static_cast<float>(volume0to100) / 100.0f;
+  Serial.printf("[audio] volume set to %d%%\n", volume0to100);
+}
+
+extern "C" void bmo_audio_push_pcm16(const uint8_t* data, size_t len) {
+  if (data == nullptr || len < 2) return;
+  // 24 → 16 kHz downsample by dropping 1 of every 3 input samples.
+  static uint8_t leftoverByte = 0;
+  static bool hasLeftover = false;
+  static uint8_t skipPhase = 0;  // 0,1,2 — skip when phase == 2.
+
+  // Stitch a leading half-sample from the previous chunk if present.
+  size_t i = 0;
+  if (hasLeftover && len >= 1) {
+    int16_t sample = static_cast<int16_t>(
+        static_cast<uint16_t>(leftoverByte) |
+        (static_cast<uint16_t>(data[0]) << 8));
+    hasLeftover = false;
+    if (skipPhase != 2) {
+      float f = (static_cast<float>(sample) / 32768.0f) * g_volume;
+      if (f >  1.0f) f =  1.0f;
+      else if (f < -1.0f) f = -1.0f;
+      int16_t out = static_cast<int16_t>(f * 32767.0f);
+      size_t written = 0;
+      i2s_write(AUDIO_I2S_PORT, &out, sizeof(out), &written, portMAX_DELAY);
+    }
+    skipPhase = (skipPhase + 1) % 3;
+    i = 1;
+  }
+
+  static int16_t batch[256];
+  size_t batchN = 0;
+
+  while (i + 1 < len) {
+    int16_t sample = static_cast<int16_t>(
+        static_cast<uint16_t>(data[i]) |
+        (static_cast<uint16_t>(data[i + 1]) << 8));
+    i += 2;
+
+    if (skipPhase == 2) {
+      skipPhase = 0;
+      continue;
+    }
+    skipPhase++;
+
+    float f = (static_cast<float>(sample) / 32768.0f) * g_volume;
+    if (f >  1.0f) f =  1.0f;
+    else if (f < -1.0f) f = -1.0f;
+    batch[batchN++] = static_cast<int16_t>(f * 32767.0f);
+
+    if (batchN == sizeof(batch) / sizeof(batch[0])) {
+      size_t written = 0;
+      i2s_write(AUDIO_I2S_PORT, batch, batchN * sizeof(int16_t), &written,
+                portMAX_DELAY);
+      batchN = 0;
+    }
+  }
+
+  if (batchN > 0) {
+    size_t written = 0;
+    i2s_write(AUDIO_I2S_PORT, batch, batchN * sizeof(int16_t), &written,
+              portMAX_DELAY);
+  }
+
+  // Save any trailing odd byte for the next chunk.
+  if (i < len) {
+    leftoverByte = data[i];
+    hasLeftover = true;
+  }
+}
+
 // Play a sine tone of given frequency for given duration.
 // `boost` is an optional per-tone multiplier (1.0 = use g_volume as-is,
 // 0.5 = half of g_volume for quieter notes, etc).
@@ -843,35 +1046,87 @@ static void playSilence(uint32_t durationMs) {
 }
 
 // -----------------------------------------------------------------------------
-// Pre-baked PCM clip playback.
+// Pre-baked tiny clip playback.
 //
 // Clips live in src/audio_clips.h, generated by tools/bake_audio.py from
-// real WAV/MP3 files. Format: 8-bit unsigned PCM, mono, 16 kHz.
+// WAV/MP3 files. Format: 4-bit IMA ADPCM, mono, 16 kHz.
 //
-// We convert 8-bit unsigned (0..255, midpoint 128) to signed 16-bit
-// (-32768..32767) on the fly while applying volume, then stream to I2S.
+// We decode nibbles to signed 16-bit PCM on the fly while applying volume,
+// then stream to I2S. This halves flash use versus the previous 8-bit PCM.
 // -----------------------------------------------------------------------------
+static const int8_t kImaIndexTable[16] = {
+  -1, -1, -1, -1, 2, 4, 6, 8,
+  -1, -1, -1, -1, 2, 4, 6, 8,
+};
+
+static const int16_t kImaStepTable[89] = {
+  7, 8, 9, 10, 11, 12, 13, 14, 16, 17,
+  19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
+  50, 55, 60, 66, 73, 80, 88, 97, 107, 118,
+  130, 143, 157, 173, 190, 209, 230, 253, 279, 307,
+  337, 371, 408, 449, 494, 544, 598, 658, 724, 796,
+  876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066,
+  2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358,
+  5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899,
+  15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767,
+};
+
+static int16_t decodeImaNibble(uint8_t code, int16_t &predictor, uint8_t &stepIndex) {
+  if (stepIndex > 88) stepIndex = 88;
+  int step = kImaStepTable[stepIndex];
+  int diff = step >> 3;
+  if (code & 1) diff += step >> 2;
+  if (code & 2) diff += step >> 1;
+  if (code & 4) diff += step;
+  if (code & 8) predictor -= diff;
+  else          predictor += diff;
+
+  if (predictor > 32767) predictor = 32767;
+  else if (predictor < -32768) predictor = -32768;
+
+  int nextIndex = (int)stepIndex + kImaIndexTable[code & 0x0F];
+  if (nextIndex < 0) nextIndex = 0;
+  else if (nextIndex > 88) nextIndex = 88;
+  stepIndex = (uint8_t)nextIndex;
+  return predictor;
+}
+
 static void playClip(const BmoClip *clip) {
-  if (!clip || clip->length == 0) return;
+  if (!clip || clip->sample_count == 0) return;
+  if (clip->rate != AUDIO_RATE) return;
 
   static int16_t chunk[256];
-  uint32_t sent = 0;
-  while (sent < clip->length) {
-    uint32_t n = clip->length - sent;
-    if (n > 256) n = 256;
-    for (uint32_t i = 0; i < n; ++i) {
-      // 0..255 -> -1.0..+1.0
-      int s = (int)clip->samples[sent + i] - 128;        // -128..+127
-      float f = (float)s / 128.0f;
-      f *= g_volume;
+  int16_t predictor = clip->predictor;
+  uint8_t stepIndex = clip->step_index;
+  uint32_t produced = 0;
+  uint32_t encodedIndex = 0;
+  bool highNibble = false;
+
+  while (produced < clip->sample_count) {
+    uint32_t n = 0;
+    while (n < 256 && produced < clip->sample_count) {
+      int16_t sample;
+      if (produced == 0) {
+        sample = predictor;
+      } else {
+        if (encodedIndex >= clip->length) break;
+        uint8_t packed = clip->samples[encodedIndex];
+        uint8_t code = highNibble ? (packed >> 4) : (packed & 0x0F);
+        if (highNibble) encodedIndex++;
+        highNibble = !highNibble;
+        sample = decodeImaNibble(code, predictor, stepIndex);
+      }
+
+      float f = ((float)sample / 32768.0f) * g_volume;
       if (f > 1.0f) f = 1.0f;
       else if (f < -1.0f) f = -1.0f;
-      chunk[i] = (int16_t)(f * 32767.0f);
+      chunk[n++] = (int16_t)(f * 32767.0f);
+      produced++;
     }
+    if (n == 0) break;
     size_t written;
     i2s_write(AUDIO_I2S_PORT, chunk, n * sizeof(int16_t), &written,
               portMAX_DELAY);
-    sent += n;
   }
 }
 
@@ -894,10 +1149,9 @@ static void playClipOrSynth(const char *name, void (*synthFallback)()) {
 
 
 // -----------------------------------------------------------------------------
-// BMO voice synth — procedural sounds that capture BMO's beep-and-chirp
-// vocal character without needing pre-recorded audio. For phrases that need
-// real words ("Hi friend!", "Who wants to play video games?"), see
-// tools/generate_voice.py for the TTS-based pipeline.
+// Toy voice synth — procedural sounds that give BMO a bright beep-and-chirp
+// character without needing pre-recorded audio. For tiny generated phrases,
+// see tools/generate_tiny_voice.py and tools/bake_audio.py.
 // -----------------------------------------------------------------------------
 
 // Slide from one frequency to another over a duration. Adds a slight vibrato
@@ -994,7 +1248,7 @@ static void playBmoChant() {
 }
 
 // "Who wants to play video games?" placeholder — long playful melody.
-// Real TTS recommended; this is a stand-in until tools/generate_voice.py is run.
+// The tiny voice pack can override this with a generated toy-voice clip.
 static void playBmoGames() {
   static const float notes[] = { 700, 700, 800, 700, 600, 700, 800, 900, 1100 };
   static const uint16_t durs[] = {  80,  60,  80,  60,  80,  80,  80, 100, 200 };
@@ -1048,9 +1302,16 @@ static const Note kJingleFocused[]  = { {880, 50}, {0, 30}, {880, 50} };
 static const Note kJingleExcited[]  = { {659, 60}, {784, 60}, {988, 60}, {1175, 100} };
 static const Note kJingleDizzy[]    = { {880, 80}, {659, 80}, {440, 80}, {659, 80} };
 static const Note kJingleListen[]   = { {880, 50} };
+static const Note kJingleThinking[] = { {650, 60}, {0, 40}, {740, 60}, {0, 40}, {880, 80} };
 static const Note kJingleWink[]     = { {1000, 60} };
 static const Note kJingleGlitch[]   = { {200, 30}, {1500, 30}, {200, 30}, {1500, 30} };
 static const Note kJingleIdle[]     = { {0, 0} };  // silent
+
+// ============================================================================
+// Songs / TTS audio are now produced host-side by Doraemon (BMO soul) and
+// streamed back as PCM. The ESP32 stays minimal: animate face, capture mic,
+// play whatever audio the bridge sends. Removed dead in-firmware song bank.
+// ============================================================================
 
 enum Mood : uint8_t {
   MOOD_IDLE,
@@ -1058,6 +1319,7 @@ enum Mood : uint8_t {
   MOOD_HAPPY,
   MOOD_TALK,
   MOOD_LISTEN,
+  MOOD_THINKING,
   MOOD_SURPRISE,
   MOOD_SLEEPY,
   MOOD_WINK,
@@ -1089,6 +1351,7 @@ static const char *moodName(Mood m) {
     case MOOD_HAPPY:    return "happy";
     case MOOD_TALK:     return "talk";
     case MOOD_LISTEN:   return "listen";
+    case MOOD_THINKING: return "thinking";
     case MOOD_SURPRISE: return "surprise";
     case MOOD_SLEEPY:   return "sleepy";
     case MOOD_WINK:     return "wink";
@@ -1122,6 +1385,7 @@ static void jingleFor(Mood m, const Note *&n, size_t &count) {
     case MOOD_HAPPY:    J(kJingleHappy); break;
     case MOOD_TALK:     J(kJingleTalk); break;
     case MOOD_LISTEN:   J(kJingleListen); break;
+    case MOOD_THINKING: J(kJingleThinking); break;
     case MOOD_SURPRISE: J(kJingleSurprise); break;
     case MOOD_SLEEPY:   J(kJingleSleepy); break;
     case MOOD_WINK:     J(kJingleWink); break;
@@ -1169,11 +1433,13 @@ static void playMood(Mood m, uint32_t durationMs) {
 
     switch (m) {
       case MOOD_IDLE: {
-        s.mouth = FaceState::M_SMILE;
-        s.pupilDx = (int)(2 * sinf(now * 0.0015f));
-        uint32_t bp = now % 3000;
-        if (bp < 150) {
-          float p = bp / 150.0f;
+        s.mouth = FaceState::M_OPEN;
+        s.mouthOpen = 0.55f + 0.05f * sinf(now * 0.0013f);
+        s.pupilDx = (int)(2 * sinf(now * 0.0011f));
+        s.pupilDy = (int)(1 * sinf(now * 0.0007f));
+        uint32_t bp = now % 5200;
+        if (bp < 130) {
+          float p = bp / 130.0f;
           float lid = (p < 0.5f) ? p * 2 : (1 - p) * 2;
           s.lidL = s.lidR = lid;
         }
@@ -1186,21 +1452,38 @@ static void playMood(Mood m, uint32_t durationMs) {
         break;
       }
       case MOOD_HAPPY: {
+        s.eyeShape = FaceState::EYE_CRESCENT;
         s.mouth = FaceState::M_OPEN;
         s.mouthOpen = 0.6f + 0.4f * sinf(now * 0.012f);
-        s.lidL = s.lidR = 0.45f;
         s.blush = 1.0f;
         break;
       }
       case MOOD_TALK: {
         s.mouth = FaceState::M_TALK;
-        s.mouthOpen = 0.5f + 0.5f * sinf(now * 0.025f);
+        s.mouthOpen = 0.5f + 0.5f * sinf(now * 0.018f);
+        uint8_t talkPhase = (uint8_t)((now / 120) % 3);
+        if (talkPhase == 0) s.pupilDx = -1;
+        else if (talkPhase == 1) s.pupilDx = 1;
         s.pupilDy = (int)(1 * sinf(now * 0.01f));
         break;
       }
       case MOOD_LISTEN: {
-        s.mouth = FaceState::M_FLAT;
+        s.mouth = FaceState::M_OPEN;
+        s.mouthOpen = 0.18f + 0.06f * fabsf(sinf(now * 0.010f));
         s.pupilDx = (int)(1 * sinf(now * 0.005f));
+        s.pupilDy = (int)(1 * sinf(now * 0.003f));
+        s.listeningMarks = true;
+        s.shakeY = (int)(1 * sinf(now * 0.006f));
+        break;
+      }
+      case MOOD_THINKING: {
+        s.mouth = FaceState::M_FLAT;
+        s.flatWidth = 18 + (int)(3 * sinf(now * 0.004f));
+        s.pupilDx = 2 + (int)(1 * sinf(now * 0.003f));
+        s.pupilDy = -2;
+        s.lidL = s.lidR = 0.15f + 0.08f * fabsf(sinf(now * 0.004f));
+        s.thinkingDots = true;
+        s.shakeY = (int)(1 * sinf(now * 0.002f));
         break;
       }
       case MOOD_SURPRISE: {
@@ -1258,8 +1541,8 @@ static void playMood(Mood m, uint32_t durationMs) {
         break;
       }
       case MOOD_EXCITED: {
+        s.eyeShape = FaceState::EYE_CRESCENT;
         s.mouth = FaceState::M_GRIN;
-        s.lidL = s.lidR = 0.3f;
         s.starsVisible = true;
         // bouncing
         s.shakeY = -(int)(2 * fabsf(sinf(now * 0.012f)));
@@ -1391,8 +1674,8 @@ static void playMood(Mood m, uint32_t durationMs) {
         break;
       }
       case MOOD_LAUGH: {
+        s.eyeShape = FaceState::EYE_CRESCENT;
         // Crescent eyes (heavy lids), big laugh mouth, blush
-        s.lidL = s.lidR = 0.5f;
         s.mouth = FaceState::M_LAUGH;
         s.mouthOpen = 0.7f + 0.3f * sinf(now * 0.025f);
         s.shakeY = (int)(2 * fabsf(sinf(now * 0.025f)));
@@ -1403,6 +1686,7 @@ static void playMood(Mood m, uint32_t durationMs) {
       default: break;
     }
 
+    applyMoodTransition(s, t);
     renderFrame(s, now);
     delay(30);
 
@@ -1582,88 +1866,209 @@ static void particlesDraw() {
 // Render a frame and overlay particles. Use instead of renderFrame() during
 // reactions that emit particles.
 static void renderFrameWithParticles(const FaceState &s, uint32_t now) {
-  // Reuse the same path as renderFrame but draw particles on top before flush.
-  // We can't easily inject between draw and flush without splitting renderFrame,
-  // so we replicate the body here. Cheap and keeps the API simple.
-  uint16_t bg = s.bgOverride ? s.bgOverride : C_BG;
-  fbFill(bg);
+  drawFaceToBuffer(s, now);
+  particlesDraw();
+  flushFrame();
+}
 
-  int leftCx  = MOUTH_CX - EYE_DX + s.shakeX;
-  int rightCx = MOUTH_CX + EYE_DX + s.shakeX;
-  int eyeY    = EYE_Y + s.shakeY;
-
-  if (s.blush > 0) {
-    int r = 5 + (int)(2 * s.blush);
-    fbFillEllipse(20,         eyeY + 20, r + 1, r, C_BLUSH);
-    fbFillEllipse(TFT_W - 20, eyeY + 20, r + 1, r, C_BLUSH);
+static void playReactionGlance(TouchKind k) {
+  int dir = 0;
+  int up = 0;
+  switch (k) {
+    case TOUCH_QUICK_POKE: dir = -2; up = -1; break;
+    case TOUCH_HOLD:       dir =  2; up =  0; break;
+    case TOUCH_LONG_HOLD:  dir =  1; up = -1; break;
+    case TOUCH_TICKLE:     dir = -1; up =  1; break;
+    default: break;
   }
 
-  // (Same eye dispatch as renderFrame.)
-  switch (s.eyeShape) {
-    case FaceState::EYE_NORMAL:
-      fbDrawEye(leftCx,  eyeY, EYE_W, EYE_H, s.lidL, s.pupilDx, s.pupilDy);
-      fbDrawEye(rightCx, eyeY, EYE_W, EYE_H, s.lidR, s.pupilDx, s.pupilDy);
-      break;
-    case FaceState::EYE_HEART:
-      fbDrawHeartEye(leftCx,  eyeY, 7, C_HEART);
-      fbDrawHeartEye(rightCx, eyeY, 7, C_HEART);
-      break;
-    case FaceState::EYE_X:
-      fbDrawXEye(leftCx,  eyeY, 7, C_INK);
-      fbDrawXEye(rightCx, eyeY, 7, C_INK);
-      break;
-    case FaceState::EYE_DOT:
-      fbFillCircle(leftCx,  eyeY, 3, C_INK);
-      fbFillCircle(rightCx, eyeY, 3, C_INK);
-      break;
-    default:
-      fbDrawEye(leftCx,  eyeY, EYE_W, EYE_H, s.lidL, s.pupilDx, s.pupilDy);
-      fbDrawEye(rightCx, eyeY, EYE_W, EYE_H, s.lidR, s.pupilDx, s.pupilDy);
-      break;
+  uint32_t start = millis();
+  while (millis() - start < 110) {
+    uint32_t now = millis();
+    float t = (now - start) / 110.0f;
+    FaceState s;
+    s.mouth = FaceState::M_SMILE;
+    s.smileWidth = 42;
+    s.smileDip = 6;
+    s.pupilDx = (int)(dir * t);
+    s.pupilDy = (int)(up * t);
+    renderFrameWithParticles(s, now);
+    delay(18);
   }
+}
 
-  if (s.browVisible) {
-    fbDrawBrow(leftCx,  eyeY - EYE_H / 2 - 6, 18, s.browSlope, 4, C_BROW);
-    fbDrawBrow(rightCx, eyeY - EYE_H / 2 - 6, 18, -s.browSlope, 4, C_BROW);
+// -----------------------------------------------------------------------------
+// Brain glue — long-hold gesture captures audio and asks the dashboard.
+//
+// Flow:
+//   1. We've already played `playReactionGlance(TOUCH_LONG_HOLD)` and are now
+//      animating a "listening" face while we capture from the mic. The user
+//      just *stopped* holding (that's how the gesture is detected), so we
+//      give them ~3 s of speech room; capture continues until either the
+//      buffer fills or the timeout hits.
+//   2. Wrap the captured PCM16 in a RIFF/WAVE header in-place, then call
+//      BrainClient::ask(). The client streams the dashboard's PCM16 reply
+//      through `bmo_audio_push_pcm16()` (defined above), which downsamples
+//      to 16 kHz and writes to the speaker.
+//   3. Status callbacks pulse the face mood while listening / thinking /
+//      talking, then we return to the main mood loop.
+//
+// If WiFi or HTTP fails we play a soft "what?" cue and animate the
+// confused / sad mood briefly. Standalone behavior is still available via
+// the other touch gestures.
+// -----------------------------------------------------------------------------
+
+static bmo::BrainClient g_brain;
+static volatile bmo::BrainStatus g_brainStatus = bmo::BrainStatus::Idle;
+
+static const char* brainStatusName(bmo::BrainStatus s) {
+  switch (s) {
+    case bmo::BrainStatus::Idle:      return "idle";
+    case bmo::BrainStatus::Listening: return "listening";
+    case bmo::BrainStatus::Thinking:  return "thinking";
+    case bmo::BrainStatus::Talking:   return "talking";
+    case bmo::BrainStatus::Error:     return "error";
   }
+  return "?";
+}
 
-  switch (s.mouth) {
-    case FaceState::M_SMILE:
-      fbDrawSmile(MOUTH_CX + s.shakeX, MOUTH_Y - 4 + s.shakeY, 56, 10, 4, 6, C_INK);
-      break;
-    case FaceState::M_OPEN: {
-      int rx = 10 + (int)(14 * s.mouthOpen);
-      int ry = 4  + (int)(10 * s.mouthOpen);
-      fbFillEllipse(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, rx, ry, C_INK);
+static void onBrainStatus(bmo::BrainStatus s) {
+  g_brainStatus = s;
+  Serial.printf("[brain] status: %s\n", brainStatusName(s));
+}
+
+// Drives the listening / thinking / talking face moods until the brain task
+// finishes. We render frames here from the foreground so the LCD never goes
+// blank; status comes from the brain client's callback.
+static void renderBrainStatusFrame(uint32_t now) {
+  FaceState s;
+  switch (g_brainStatus) {
+    case bmo::BrainStatus::Listening: {
+      s.eyeShape  = FaceState::EYE_NORMAL;
+      s.mouth     = FaceState::M_FLAT;
+      s.lidL      = s.lidR = 0.05f + 0.05f * sinf(now * 0.01f);
+      // gentle eye sway
+      s.pupilDx   = (int)(1.5f * sinf(now * 0.004f));
+      // ear-cupped pose: tiny tilt
+      s.shakeX    = (int)(1 * sinf(now * 0.003f));
+      fbDrawListeningMarks(now);
       break;
     }
-    case FaceState::M_LAUGH:
-      fbDrawLaugh(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, s.mouthOpen, now);
+    case bmo::BrainStatus::Thinking: {
+      s.eyeShape = FaceState::EYE_NORMAL;
+      s.mouth    = FaceState::M_FLAT;
+      s.pupilDx  = (int)(2 * sinf(now * 0.002f));
+      s.pupilDy  = -1;
+      s.shakeY   = (int)(0.5f * sinf(now * 0.003f));
+      fbDrawThinkingDots(now);
       break;
-    case FaceState::M_OH:
-      fbFillEllipse(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, 6, 8, C_INK);
+    }
+    case bmo::BrainStatus::Talking: {
+      // Mouth chatters with a faux-speech envelope; eyes warm.
+      const float wave = 0.5f + 0.5f * sinf(now * 0.018f);
+      s.mouth     = FaceState::M_OPEN;
+      s.mouthOpen = 0.25f + 0.55f * wave;
+      s.eyeShape  = FaceState::EYE_CRESCENT;
+      s.lidL      = s.lidR = 0.25f;
       break;
-    case FaceState::M_FLAT:
-      fbDrawFlatMouth(MOUTH_CX + s.shakeX, MOUTH_Y + s.shakeY, 38, 4, C_INK);
-      break;
+    }
     default:
-      fbDrawSmile(MOUTH_CX + s.shakeX, MOUTH_Y - 4 + s.shakeY, 56, 10, 4, 6, C_INK);
+      s.mouth = FaceState::M_SMILE;
       break;
   }
+  renderFrameWithParticles(s, now);
+}
 
-  particlesDraw();   // ⭐ overlay particles
-  flushFrame();
+static void askBrain() {
+  // Stage 0: face says "listening" while we capture from mic.
+  g_brainStatus = bmo::BrainStatus::Listening;
+
+  // 3 s capture cap (mic buffer is sized for it). The user already released
+  // the touch, so we don't have a "stop on release" lambda — capture until
+  // either the buffer fills or capture stalls.
+  int16_t* pcm = bmo::micStaticBuffer();
+  const uint32_t captureStart = millis();
+  size_t samples = 0;
+  // Animate the listening face for up to ~3s while we collect.
+  while (samples < bmo::kMicCaptureSamples && (millis() - captureStart) < 3500) {
+    const size_t batchTarget = (size_t)((millis() - captureStart) * 16); // ~16 sps/ms
+    const size_t want =
+        (batchTarget > samples && batchTarget - samples < 2048)
+            ? (batchTarget - samples)
+            : 1024;
+    const size_t cap = bmo::kMicCaptureSamples - samples;
+    const size_t batch = (want > cap) ? cap : want;
+    const size_t got = bmo::micCapture(pcm + samples, batch, nullptr);
+    samples += got;
+    renderBrainStatusFrame(millis());
+    if (got == 0) break;
+  }
+  Serial.printf("[brain] captured %u samples (%lums)\n",
+                static_cast<unsigned>(samples),
+                static_cast<unsigned long>(millis() - captureStart));
+
+  if (samples < 4000) {
+    // <250ms of audio; treat as cancellation, no point sending.
+    Serial.println("[brain] capture too short, skipping");
+    g_brainStatus = bmo::BrainStatus::Idle;
+    return;
+  }
+
+  // Build a RIFF/WAVE header and concatenate with the PCM bytes. We allocate
+  // a contiguous buffer on the heap so the brain client can hand it to
+  // HTTPClient::POST() in one shot.
+  const size_t pcmBytes = samples * sizeof(int16_t);
+  const size_t totalBytes = 44 + pcmBytes;
+  uint8_t* wav = static_cast<uint8_t*>(malloc(totalBytes));
+  if (wav == nullptr) {
+    Serial.printf("[brain] oom for wav (%u bytes)\n",
+                  static_cast<unsigned>(totalBytes));
+    g_brainStatus = bmo::BrainStatus::Error;
+    return;
+  }
+  bmo::wavWriteHeader(wav, pcmBytes, 16000, 1, 16);
+  memcpy(wav + 44, pcm, pcmBytes);
+
+  // Stage 1+: brain client takes over. It emits Thinking → Talking → Idle.
+  const bool ok = g_brain.ask(wav, totalBytes);
+  free(wav);
+
+  if (!ok) {
+    Serial.println("[brain] ask() failed; playing fallback");
+    g_brainStatus = bmo::BrainStatus::Error;
+    playClipOrSynth("bmo_what", playBmoStartled);
+    // Brief sad/confused face so the user knows it didn't work.
+    const uint32_t errStart = millis();
+    while (millis() - errStart < 700) {
+      FaceState s;
+      s.mouth = FaceState::M_FROWN;
+      s.smileWidth = 36;
+      s.smileDip = 4;
+      s.lidL = s.lidR = 0.6f;
+      renderFrameWithParticles(s, millis());
+      delay(28);
+    }
+  }
+  g_brainStatus = bmo::BrainStatus::Idle;
 }
 
 static void playReaction(TouchKind k) {
   Serial.printf("touch: %s\n", touchKindName(k));
   particlesClear();
+  playReactionGlance(k);
+
+  // -------- LONG_HOLD: route to dashboard brain instead of canned reaction --
+  if (k == TOUCH_LONG_HOLD) {
+    askBrain();
+    particlesClear();
+    return;
+  }
 
   switch (k) {
 
     // ─────────────────────────────────────────────────────────────────────
     // QUICK POKE
-    // anticipation (compress) → recoil up + gasp + exclamation burst →
+    // anticipation (compress) → recoil up + gasp →
     // dart eyes seeking culprit → relief blink → nervous smile + faint blush
     // ─────────────────────────────────────────────────────────────────────
     case TOUCH_QUICK_POKE: {
@@ -1681,8 +2086,7 @@ static void playReaction(TouchKind k) {
         renderFrameWithParticles(s, now);
         delay(15);
       }
-      // Phase B — recoil 200ms (gasp + exclamation particles)
-      particlesEmit(6, MOUTH_CX, MOUTH_Y - 30, 2, C_INK);    // exclamation burst
+      // Phase B — recoil 200ms (gasp, no center marker)
       uint32_t pB = millis();
       while (millis() - pB < 220) {
         uint32_t now = millis();
@@ -1740,8 +2144,8 @@ static void playReaction(TouchKind k) {
 
     // ─────────────────────────────────────────────────────────────────────
     // HOLD ("pet")
-    // glance → relax → contented purr with breathing eyes + sway + ambient
-    // pink dot particles trickling up. Eyes track toward touch on entry.
+    // glance → bashful BMO smile → contented purr with small sway + occasional
+    // pink cheek puffs. Eyes track toward touch on entry.
     // ─────────────────────────────────────────────────────────────────────
     case TOUCH_HOLD: {
       // Voice: clip "bmo_hi_friend" if available, otherwise synth
@@ -1767,31 +2171,33 @@ static void playReaction(TouchKind k) {
         uint32_t now = millis();
         float t = (now - pB) / 800.0f;
         FaceState s;
-        s.mouth = FaceState::M_OPEN;
-        s.mouthOpen = 0.25f + 0.3f * t;
-        s.lidL = s.lidR = 0.20f + 0.30f * t;
-        s.blush = 0.3f + 0.7f * t;
+        s.eyeShape = FaceState::EYE_CRESCENT;
+        s.mouth = FaceState::M_SMILE;
+        s.smileWidth = 38 + (int)(4 * t);
+        s.smileDip = 6 + (int)(2 * t);
+        s.blush = 0.25f + 0.4f * t;
         s.pupilDx = 3 - (int)(3 * t);
         s.shakeX = (int)(1 * sinf(now * 0.005f));
         renderFrameWithParticles(s, now);
         delay(22);
       }
       // Phase C — purr 1500ms: looped breathing animation, ambient pink dot
-      // particles drift upward off the cheeks every ~250ms
+      // particles drift upward off the cheeks every ~420ms
       uint32_t pC = millis();
       uint32_t lastPuff = 0;
       while (millis() - pC < 1500) {
         uint32_t now = millis();
-        if (now - lastPuff > 250) {
-          particlesEmit(2, 30,         70, 3, C_BLUSH);
-          particlesEmit(2, TFT_W - 30, 70, 3, C_BLUSH);
+        if (now - lastPuff > 420) {
+          particlesEmit(1, 34,         66, 3, C_BLUSH);
+          particlesEmit(1, TFT_W - 34, 66, 3, C_BLUSH);
           lastPuff = now;
         }
         FaceState s;
-        s.mouth = FaceState::M_OPEN;
-        s.mouthOpen = 0.55f + 0.18f * sinf(now * 0.008f);
-        s.lidL = s.lidR = 0.50f + 0.10f * sinf(now * 0.005f);
-        s.blush = 1.0f;
+        s.eyeShape = FaceState::EYE_CRESCENT;
+        s.mouth = FaceState::M_SMILE;
+        s.smileWidth = 40 + (int)(2 * sinf(now * 0.006f));
+        s.smileDip = 7;
+        s.blush = 0.65f;
         s.shakeX = (int)(1 * sinf(now * 0.004f));
         s.shakeY = (int)(1 * sinf(now * 0.006f));
         particlesStep();
@@ -1805,8 +2211,8 @@ static void playReaction(TouchKind k) {
 
     // ─────────────────────────────────────────────────────────────────────
     // LONG HOLD ("deep affection")
-    // pet phase → swelling anticipation → musical sting → heart-eye
-    // transformation with floating hearts that burst in a circle
+    // bashful BMO pet phase → tiny heart pop → shy smile. Keep it sweet,
+    // not a full anime affection storm.
     // ─────────────────────────────────────────────────────────────────────
     case TOUCH_LONG_HOLD: {
       // Voice: clip "bmo_chant" if available, otherwise synth
@@ -1817,10 +2223,11 @@ static void playReaction(TouchKind k) {
         uint32_t now = millis();
         float t = (now - pA) / 1000.0f;
         FaceState s;
-        s.mouth = FaceState::M_OPEN;
-        s.mouthOpen = 0.3f + 0.3f * t;
-        s.lidL = s.lidR = 0.20f + 0.30f * t;
-        s.blush = 0.4f + 0.6f * t;
+        s.eyeShape = FaceState::EYE_CRESCENT;
+        s.mouth = FaceState::M_SMILE;
+        s.smileWidth = 38 + (int)(5 * t);
+        s.smileDip = 6 + (int)(2 * t);
+        s.blush = 0.35f + 0.35f * t;
         s.shakeX = (int)(1 * sinf(now * 0.005f));
         renderFrameWithParticles(s, now);
         delay(25);
@@ -1834,18 +2241,19 @@ static void playReaction(TouchKind k) {
         float t = (now - pB) / 700.0f;
         float ease = t * t;
         FaceState s;
-        s.mouth = FaceState::M_OPEN;
-        s.mouthOpen = 0.6f + 0.3f * sinf(now * 0.015f);
-        s.lidL = s.lidR = 0.45f - 0.45f * ease;
-        s.blush = 1.0f;
-        s.shakeY = -(int)(3 * ease);
+        s.eyeShape = FaceState::EYE_CRESCENT;
+        s.mouth = FaceState::M_SMILE;
+        s.smileWidth = 42 + (int)(4 * sinf(now * 0.012f));
+        s.smileDip = 7;
+        s.blush = 0.7f;
+        s.shakeY = -(int)(2 * ease);
         renderFrameWithParticles(s, now);
         delay(28);
       }
       // Phase C — sting + heart burst (250ms): a big musical chord, a circle
       // of hearts erupts outward from BMO's chest area
       playClipOrSynth("bmo_games", playBmoGames);
-      particlesEmit(MAX_PARTICLES, MOUTH_CX, MOUTH_Y - 5, 1, C_HEART);
+      particlesEmit(4, MOUTH_CX, MOUTH_Y - 5, 1, C_HEART);
       uint32_t pC = millis();
       while (millis() - pC < 250) {
         uint32_t now = millis();
@@ -1857,23 +2265,25 @@ static void playReaction(TouchKind k) {
         renderFrameWithParticles(s, now);
         delay(20);
       }
-      // Phase D — heart eyes (1700ms): full love mode, eyes are hearts,
-      // ambient hearts gently float around face, body bobs softly
+      // Phase D — bashful hold (1700ms): brief heart eyes, then shy crescent
+      // eyes with sparse hearts and a tiny body bob.
       uint32_t pD = millis();
       uint32_t lastHeart = 0;
       while (millis() - pD < 1700) {
         uint32_t now = millis();
-        if (now - lastHeart > 350) {
-          particlesEmit(2, 25 + ((int)(now / 100) % 8), 90, 1, C_HEART);
-          particlesEmit(2, TFT_W - 25 - ((int)(now / 100) % 8), 90, 1, C_HEART);
+        float t = (now - pD) / 1700.0f;
+        if (now - lastHeart > 650) {
+          particlesEmit(1, 30 + ((int)(now / 100) % 6), 88, 1, C_HEART);
+          particlesEmit(1, TFT_W - 30 - ((int)(now / 100) % 6), 88, 1, C_HEART);
           lastHeart = now;
         }
         FaceState s;
-        s.eyeShape = FaceState::EYE_HEART;
-        s.mouth = FaceState::M_OPEN;
-        s.mouthOpen = 0.5f + 0.4f * sinf(now * 0.012f);
-        s.blush = 1.0f;
-        s.shakeY = -(int)(2 + 1.5f * sinf(now * 0.008f));
+        s.eyeShape = (t < 0.35f) ? FaceState::EYE_HEART : FaceState::EYE_CRESCENT;
+        s.mouth = FaceState::M_SMILE;
+        s.smileWidth = 40 + (int)(3 * sinf(now * 0.008f));
+        s.smileDip = 7;
+        s.blush = 0.75f;
+        s.shakeY = -(int)(1 + 1.0f * sinf(now * 0.008f));
         particlesStep();
         renderFrameWithParticles(s, now);
         delay(28);
@@ -1893,11 +2303,12 @@ static void playReaction(TouchKind k) {
       // Voice: clip "bmo_laugh" if available, otherwise synth
       playClipOrSynth("bmo_laugh", playBmoLaugh);
       // Phase A — burst of giggles (350ms): sharp high "ha!"
-      particlesEmit(6, MOUTH_CX, MOUTH_Y - 20, 0, C_STAR);
+      particlesEmit(4, MOUTH_CX, MOUTH_Y - 20, 0, C_STAR);
       uint32_t pA = millis();
       while (millis() - pA < 350) {
         uint32_t now = millis();
         FaceState s;
+        s.eyeShape = FaceState::EYE_CRESCENT;
         s.lidL = s.lidR = 0.4f + 0.2f * sinf(now * 0.04f);
         s.mouth = FaceState::M_LAUGH;
         s.mouthOpen = 0.9f;
@@ -1925,10 +2336,11 @@ static void playReaction(TouchKind k) {
           lastBeep = now;
         }
         if (wave > 0.75f && now - lastStar > 220) {
-          particlesEmit(3, 20 + (rand() % 120), 30 + (rand() % 30), 0, C_STAR);
+          particlesEmit(1, 20 + (rand() % 120), 30 + (rand() % 30), 0, C_STAR);
           lastStar = now;
         }
         FaceState s;
+        s.eyeShape = FaceState::EYE_CRESCENT;
         // squeezed shut crescents that vary with intensity
         s.lidL = s.lidR = 0.55f + 0.15f * fabsf(wave);
         s.mouth = FaceState::M_LAUGH;
@@ -1949,6 +2361,7 @@ static void playReaction(TouchKind k) {
         uint32_t now = millis();
         float t = (now - pC) / 300.0f;
         FaceState s;
+        s.eyeShape = FaceState::EYE_CRESCENT;
         s.lidL = s.lidR = 0.55f + 0.15f * (1 - t);
         s.mouth = FaceState::M_OPEN;
         s.mouthOpen = 0.4f - 0.3f * t;
@@ -1971,6 +2384,7 @@ reactionDone:
     uint32_t now = millis();
     float t = (now - settleStart) / 250.0f;
     FaceState s;
+    s.eyeShape = FaceState::EYE_CRESCENT;
     s.mouth = FaceState::M_SMILE;
     s.lidL = s.lidR = 0.2f + 0.05f * sinf(now * 0.01f);
     s.blush = 0.3f + 0.2f * (1 - t);
@@ -2004,6 +2418,69 @@ void setup() {
 
   audioInit();
   Serial.println("audio ready");
+
+  // Mic init shares the I2S unit with the speaker but on the second port.
+  if (bmo::micBegin()) {
+    Serial.println("mic ready");
+  } else {
+    Serial.println("mic init failed; long-hold-to-ask will not work");
+  }
+
+  // ── Provisioning ───────────────────────────────────────────────────────
+  // If the user is holding the touch button while we boot, treat that as a
+  // factory-reset gesture: wipe NVS so the captive portal opens fresh.
+  if (digitalRead(PIN_TOUCH) == HIGH) {
+    Serial.println("[boot] factory reset gesture detected — clearing creds");
+    bmo::g_provisioning.clear();
+    // Show a brief "RESET" face so the user knows the gesture was honoured.
+    fbFill(C_BG);
+    flushFrame();
+    delay(600);
+  }
+
+  // While the portal blocks for credentials, drive a "setup mode" face so
+  // the screen isn't dead. The lambda is called ~50 Hz from inside the
+  // portal loop. Curious / questioning eyes plus a faintly glowing antenna
+  // line communicate "I'm waiting on the network."
+  auto renderSetupFace = []() {
+    const uint32_t now = millis();
+    FaceState s;
+    s.eyeShape = FaceState::EYE_NORMAL;
+    s.mouth    = FaceState::M_OH;
+    // Slow blink every ~3s.
+    const uint32_t blinkPhase = now % 3000;
+    s.lidL = s.lidR = (blinkPhase < 180) ? 0.85f : 0.05f;
+    // Eyes drift left/right like searching.
+    s.pupilDx = (int)(2 * sinf(now * 0.0018f));
+    s.pupilDy = (int)(1 * cosf(now * 0.0014f));
+    s.shakeX  = (int)(1 * sinf(now * 0.0009f));
+    drawFaceToBuffer(s, now);
+    fbDrawListeningMarks(now);
+    flushFrame();
+  };
+
+  // Try saved creds, then fall back to the captive portal. This *blocks* on
+  // first run until the user submits the form on their phone — the lambda
+  // above keeps the face alive during the wait.
+  Serial.println("[boot] starting provisioning...");
+  const bool wifiUp = bmo::g_provisioning.ensureProvisionedAndConnected(
+      /*portalTimeoutSeconds=*/600,
+      renderSetupFace);
+  if (!wifiUp) {
+    Serial.println("[boot] portal timed out; brain features disabled");
+  } else {
+    Serial.printf("[boot] dashboard=%s\n",
+                  bmo::g_provisioning.dashboardUrl().c_str());
+  }
+
+  // Brain client uses the URL we just got; status callback drives the
+  // listening / thinking / talking face moods.
+  g_brain.onStatus(onBrainStatus);
+  g_brain.setDashboardUrl(bmo::g_provisioning.dashboardUrl());
+  if (wifiUp) {
+    g_brain.markWifiReady();
+    g_brain.begin();
+  }
 }
 
 void loop() {
@@ -2017,6 +2494,7 @@ void loop() {
     { MOOD_LOVE,     2000 },
     { MOOD_TALK,     1800 },
     { MOOD_LISTEN,   1600 },
+    { MOOD_THINKING, 1800 },
     { MOOD_FOCUSED,  1800 },
     { MOOD_SURPRISE, 1100 },
     { MOOD_EXCITED,  1800 },

@@ -175,6 +175,31 @@ export function createOpenRouterServer(options: OpenRouterMockOptions = {}): {
         data: { total_credits: 10, total_usage: 2.5 },
       });
     }),
+
+    http.post('https://openrouter.ai/api/v1/embeddings', async ({ request }) => {
+      const body = await captureJson(request);
+      captured.push({
+        url: request.url,
+        method: request.method,
+        body,
+        headers: recordHeaders(request),
+      });
+      // Deterministic 1536-dim unit-ish vector. Content doesn't matter for
+      // tests; the brain layer only needs a well-shaped response so recall /
+      // capture / doctor exercise their happy paths.
+      const dims =
+        typeof body === 'object' &&
+        body !== null &&
+        'dimensions' in body &&
+        typeof (body as { dimensions?: unknown }).dimensions === 'number'
+          ? (body as { dimensions: number }).dimensions
+          : 1536;
+      const embedding = new Array<number>(dims).fill(0.001);
+      return HttpResponse.json({
+        data: [{ embedding, index: 0 }],
+        usage: { prompt_tokens: 4, total_cost: 0.00001 },
+      });
+    }),
   ];
 
   return { server: setupServer(...handlers), captured };

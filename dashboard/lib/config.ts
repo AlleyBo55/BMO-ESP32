@@ -28,6 +28,7 @@ const SKILL_NAMES: readonly SkillName[] = [
   'story',
   'comfort',
   'play_pretend',
+  'memory',
 ] as const;
 
 const SKILL_NAME_SET: ReadonlySet<string> = new Set<string>(SKILL_NAMES);
@@ -65,12 +66,13 @@ function makeDefaultRow(): Omit<BmoConfig, 'updated_at'> {
       story: { enabled: true },
       comfort: { enabled: true },
       play_pretend: { enabled: true },
+      memory: { enabled: true },
     },
     fingerprint_hash: '',
     llm_model: 'openai/gpt-4.1-mini',
     stt_model: 'qwen/qwen3-asr-flash-2026-02-10',
     tts_model: 'openai/gpt-audio-mini',
-    tts_voice: 'nova',
+    tts_voice: 'fable',
     volume: 60,
   };
 }

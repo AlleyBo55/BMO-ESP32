@@ -6,6 +6,8 @@ import { verifyFingerprint } from '@/app/api/_lib/fingerprint-guard';
 import { writeActivityLog, type ActivityLogRow } from '@/app/api/_lib/log';
 import { getConfig } from '@/lib/config';
 import { OpenRouterError, synthesizeStream } from '@/lib/openrouter';
+import { BMO_VOICE_DIRECTION } from '@/lib/voice';
+import { applyRadioFx } from '@/lib/voice-fx';
 import { buildWavHeader } from '@/lib/wav';
 
 /**
@@ -155,12 +157,15 @@ export async function POST(req: Request): Promise<Response> {
   // to send a JSON 502 instead of a half-open audio response.
   let iterator: AsyncIterator<Buffer>;
   try {
-    const it = synthesizeStream({
-      model: ttsModel,
-      voice,
-      text: inputText,
-      signal: req.signal,
-    });
+    const it = applyRadioFx(
+      synthesizeStream({
+        model: ttsModel,
+        voice,
+        text: inputText,
+        systemPrompt: BMO_VOICE_DIRECTION,
+        signal: req.signal,
+      }),
+    );
     iterator = it[Symbol.asyncIterator]();
   } catch (err) {
     const message =
