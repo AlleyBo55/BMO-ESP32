@@ -71,7 +71,8 @@ $soul$,
     "story":        { "enabled": true  },
     "comfort":      { "enabled": true  },
     "play_pretend": { "enabled": true  },
-    "memory":       { "enabled": true  }
+    "memory":       { "enabled": true  },
+    "random_thoughts": { "enabled": true }
   }$skills$::jsonb,
   '',
   'openai/gpt-4.1-mini',

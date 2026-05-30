@@ -29,6 +29,7 @@ const SKILL_NAMES: readonly SkillName[] = [
   'comfort',
   'play_pretend',
   'memory',
+  'random_thoughts',
 ] as const;
 
 const SKILL_NAME_SET: ReadonlySet<string> = new Set<string>(SKILL_NAMES);
@@ -67,6 +68,7 @@ function makeDefaultRow(): Omit<BmoConfig, 'updated_at'> {
       comfort: { enabled: true },
       play_pretend: { enabled: true },
       memory: { enabled: true },
+      random_thoughts: { enabled: true },
     },
     fingerprint_hash: '',
     llm_model: 'openai/gpt-4.1-mini',

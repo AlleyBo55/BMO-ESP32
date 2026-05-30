@@ -61,6 +61,12 @@ const SKILLS: ReadonlyArray<SkillMeta> = [
     description:
       'Remember past conversations and recall them before answering. The brain grows the more BMO is used.',
   },
+  {
+    name: 'random_thoughts',
+    label: 'Random thoughts',
+    description:
+      'Every few minutes when idle, BMO thinks out loud: it recalls what it knows, muses a short thought in its own voice, and remembers the thought \u2014 a self-feeding inner life (gbrain/OpenClaw style).',
+  },
 ];
 
 function paramsToJson(state: SkillState): string {

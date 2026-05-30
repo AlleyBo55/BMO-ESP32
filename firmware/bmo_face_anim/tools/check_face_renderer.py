@@ -123,6 +123,16 @@ def main() -> None:
             "open mouth should include a bright tooth/shine detail")
     require("fbDrawBmoMouth" in open_mouth_body and "C_MOUTH" in bmo_mouth_body,
             "open mouth should use the BMO dark-green mouth helper")
+    shades_body = extract_function_body(source, "static void fbDrawShades(")
+    require("leftCx  - 26" in shades_body and "rightCx + 26" in shades_body,
+            "Viper shades should be an oversized wraparound shield lens")
+    require("noseX" in shades_body and "center nose notch" in shades_body,
+            "Viper shades should include the small dark nose cutout from the reference")
+    require("C_LENS_SKY" in shades_body and "C_LENS_AQUA" in shades_body
+            and "C_LENS_TEAL" in shades_body and "C_LENS_NAVY" in shades_body,
+            "Viper shades should use stacked blue/cyan/teal mirror bands")
+    require("upper swept-back arms" in shades_body and "lower swept-back arms" in shades_body,
+            "Viper shades should have thick swept-back side arms")
 
     play_mood_start = source.find("static void playMood(")
     require(play_mood_start >= 0, "missing playMood()")

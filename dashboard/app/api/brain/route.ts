@@ -7,7 +7,7 @@ import { after } from 'next/server';
 import { verifyFingerprint } from '@/app/api/_lib/fingerprint-guard';
 import { writeActivityLog, type ActivityLogRow } from '@/app/api/_lib/log';
 import { transcodeUrlToPcm16, AudioTranscodeError } from '@/lib/audio-transcode';
-import { captureExchange, formatRecallForPrompt, recall } from '@/lib/brain';
+import { captureExchange, formatRecallForPrompt, recall, recentTurns } from '@/lib/brain';
 import { getConfig } from '@/lib/config';
 import {
   chat,
@@ -18,7 +18,12 @@ import {
 } from '@/lib/openrouter';
 import { findSongByTitle, listSongs } from '@/lib/songs';
 import type { BmoConfig, Song } from '@/lib/types';
-import { BMO_VOICE_DIRECTION } from '@/lib/voice';
+import {
+  BMO_SINGING_DIRECTION,
+  BMO_VOICE_DIRECTION,
+  buildSingTool,
+  extractSingLyrics,
+} from '@/lib/voice';
 import { applyRadioFx } from '@/lib/voice-fx';
 import { buildWavHeader } from '@/lib/wav';
 
@@ -96,7 +101,23 @@ const REPLY_HEADER_CHAR_CAP = 1024;
  */
 const LANGUAGE_DIRECTIVE = `\n\n[LANGUAGE]
 Always reply in Bahasa Indonesia (Indonesian), regardless of the language the user spoke. Use natural, warm, kid-friendly Indonesian. Avoid English loanwords unless a single specific term has no good Indonesian equivalent. Keep names of people, places, and brands as-is unless the Indonesian form is more familiar. Never narrate this rule, never apologize for it, never switch languages.
-[/LANGUAGE]`;
+[/LANGUAGE]
+
+[STYLE]
+Keep replies SHORT and direct — 1 to 2 short sentences for a normal question, like a quick chat between friends, not a paragraph. Answer the actual question FIRST and plainly, then you may add one short playful touch. Do not pile on adjectives, do not list many options, do not ramble. If the child asks a follow-up that depends on the previous turn, treat the recent conversation as the context and stay on that topic — do not change the subject on your own.
+[/STYLE]
+
+[NAME PRONUNCIATION]
+Write your own name as "BMO" in text, but it is always pronounced "Beemo" (like the English "Bee" + "Mo"), never spelled out letter by letter as "Be-Em-O". When the spoken audio is generated it must sound like "Beemo".
+[/NAME]
+
+[CHILD]
+You are a companion to ONE child. Learn who they are from the conversation; never invent details.
+- If a [CHILD PROFILE] block below tells you the child's name, address them by it naturally and warmly.
+- If you do NOT yet know the child's name, gently and playfully ask for it once early in the chat ("Oh ya, nama kamu siapa?"), then use it afterwards. Don't pester — ask only when you don't already know.
+- Whenever the child tells you their name (or corrects it), accept the newest one as the truth from then on, even if it differs from before.
+- Speech-to-text can garble names. If a stated name sounds garbled or uncertain, gently confirm it ("Namanya ... ya? Lucu deh!") instead of guessing a different name.
+[/CHILD]`;
 
 /** Combines the editable soul prompt with the immutable language clamp. */
 function buildSystemPrompt(soulMd: string): string {
@@ -143,17 +164,26 @@ function mimeToFormat(mime: string | null): 'wav' | 'mp3' | 'flac' {
 /**
  * Computes the OpenRouter `tools` array exposed to the LLM.
  *
- * Currently the only wired tool is `play_song`. It is exposed when:
- *   - the `play_music` skill is enabled, AND
- *   - the songs catalog is non-empty.
+ * Two tools may be wired:
+ *   - `sing`: exposed when the `sing` skill is enabled. Lets BMO perform a
+ *     short, made-up song live in its own singing voice (the brain route
+ *     synthesizes the `lyrics` with {@link BMO_SINGING_DIRECTION}).
+ *   - `play_song`: exposed when the `play_music` skill is enabled AND the
+ *     songs catalog is non-empty. Streams a real recording from the catalog.
  *
- * The `title` argument is constrained to a string `enum` of the actual
- * catalog titles so the model cannot hallucinate a song that does not
- * exist. The brain route handles the call by streaming the matching
- * song's PCM16 instead of synthesizing speech.
+ * The `play_song` `title` argument is constrained to a string `enum` of the
+ * actual catalog titles so the model cannot hallucinate a song that does not
+ * exist. The brain route handles each call by either synthesizing the sung
+ * lyrics or streaming the matching song's PCM16 instead of plain speech.
  */
 function buildTools(cfg: BmoConfig, songs: Song[]): OpenRouterTool[] {
   const tools: OpenRouterTool[] = [];
+
+  const sing = cfg.skills.sing;
+  if (sing !== undefined && sing.enabled) {
+    tools.push(buildSingTool());
+  }
+
   const playMusic = cfg.skills.play_music;
   if (playMusic !== undefined && playMusic.enabled && songs.length > 0) {
     const titles = songs.map((s) => s.title);
@@ -162,7 +192,7 @@ function buildTools(cfg: BmoConfig, songs: Song[]): OpenRouterTool[] {
       function: {
         name: 'play_song',
         description:
-          'Play a song from the curated catalog through the BMO speaker. Use this when the user asks for music, a song, a lullaby, or to play something specific from the catalog. Match the user request to the closest title from the enum.',
+          'Play a real recorded song from the curated catalog through the BMO speaker. Use this when the user asks to play a specific real song or piece of music that exists in the catalog. Match the user request to the closest title from the enum. To instead have BMO sing a short song in its own voice, use the `sing` tool.',
         parameters: {
           type: 'object',
           additionalProperties: false,
@@ -325,6 +355,7 @@ export async function POST(req: Request): Promise<Response> {
   let modelTts: string | null = null;
   let replyText: string;
   let songToPlay: Song | null = null;
+  let singLyrics: string | null = null;
   let memoryEnabled = false;
 
   try {
@@ -354,20 +385,35 @@ export async function POST(req: Request): Promise<Response> {
     // system prompt. Gated on the `memory` skill. Fully degradable: recall()
     // returns [] on any failure, so the brain never blocks a reply.
     let memoryBlock = '';
+    const history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
     const memorySkill = cfg.skills.memory;
     if (memorySkill !== undefined && memorySkill.enabled) {
       memoryEnabled = true;
-      const [memories, profileLine] = await Promise.all([
+      const [memories, profileLine, turns] = await Promise.all([
         recall(transcriptText, { signal: ac.signal }),
         // The durable child profile (gbrain "enrich the entity over time").
         // Best-effort: degrades to '' if the profile module/table is absent.
         import('@/lib/brain/profile')
           .then((m) => m.profileSummary())
           .catch(() => ''),
+        // Short-term dialogue history (recency, not similarity) so BMO can
+        // follow multi-turn exchanges — e.g. answer "merah" as a reply to its
+        // own previous question, and remember a name the child JUST said even
+        // before the async profile extraction has written it. 2h window keeps
+        // a whole play session in scope while not dragging in stale chats.
+        // Degrades to [] on any failure.
+        recentTurns(8, 120),
       ]);
       memoryBlock = formatRecallForPrompt(memories);
       if (profileLine.length > 0) {
         memoryBlock += `\n\n[CHILD PROFILE]\n${profileLine}\n[/CHILD PROFILE]`;
+      }
+      // Turn the stored exchanges into real chat turns. Skip the most recent
+      // one only if it exactly duplicates the incoming transcript (can happen
+      // on a quick retry); otherwise BMO sees the full back-and-forth.
+      for (const t of turns) {
+        if (t.child.length > 0) history.push({ role: 'user', content: t.child });
+        if (t.bmo.length > 0) history.push({ role: 'assistant', content: t.bmo });
       }
     }
 
@@ -375,11 +421,17 @@ export async function POST(req: Request): Promise<Response> {
       const reply = await chat({
         model: cfg.llm_model,
         systemPrompt: buildSystemPrompt(cfg.soul_md) + memoryBlock,
-        messages: [{ role: 'user', content: transcriptText }],
+        messages: [...history, { role: 'user', content: transcriptText }],
         tools: buildTools(cfg, songs),
         signal: ac.signal,
       });
       replyText = reply.text;
+
+      // If the model asked to sing, capture the lyrics. The singing path
+      // synthesizes these with BMO's singing voice direction instead of
+      // speaking reply.text. Takes precedence over play_song below only if
+      // no real song was picked.
+      singLyrics = extractSingLyrics(reply.toolCalls);
 
       // Resolve any play_song tool call to a real catalog row. We pick the
       // first valid one and ignore the rest; the LLM can still narrate over
@@ -586,14 +638,24 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   // ------------------- open TTS stream eagerly ------------------------------
+  // Singing branch: when the LLM called the `sing` tool we synthesize the
+  // sung lyrics with BMO's singing voice direction instead of speaking the
+  // plain reply. Same wire format as the spoken path — only the input text
+  // and the system prompt differ. The reply-text header reflects what was
+  // actually voiced so the device/screen shows the lyrics.
+  const isSinging = singLyrics !== null;
+  const ttsText = isSinging ? singLyrics! : replyText;
+  const ttsDirection = isSinging ? BMO_SINGING_DIRECTION : BMO_VOICE_DIRECTION;
+  const voicedReplyText = isSinging ? `🎵 ${singLyrics!}` : replyText;
+
   let iterator: AsyncIterator<Buffer>;
   try {
     const it = applyRadioFx(
       synthesizeStream({
         model: cfg.tts_model,
         voice: cfg.tts_voice,
-        text: replyText,
-        systemPrompt: BMO_VOICE_DIRECTION,
+        text: ttsText,
+        systemPrompt: ttsDirection,
         signal: ac.signal,
       }),
     );
@@ -632,7 +694,10 @@ export async function POST(req: Request): Promise<Response> {
   let logged = false;
   const cfgSnapshot = cfg;
   const finalTranscript = transcriptText;
-  const finalReply = replyText;
+  // When singing, log the sung lyrics (prefixed with 🎵) as the reply so the
+  // activity log reflects what BMO actually voiced rather than the (often
+  // empty) plain reply text that accompanied the tool call.
+  const finalReply = voicedReplyText;
 
   const finishLog = async (
     status: 'ok' | 'error',
@@ -730,7 +795,7 @@ export async function POST(req: Request): Promise<Response> {
 
   const headers = new Headers({
     'Content-Type': 'audio/wav',
-    'X-BMO-Reply-Text': encodeReplyHeader(replyText, REPLY_HEADER_CHAR_CAP),
+    'X-BMO-Reply-Text': encodeReplyHeader(voicedReplyText, REPLY_HEADER_CHAR_CAP),
     'X-BMO-Volume': String(cfg.volume),
     'X-Accel-Buffering': 'no',
     'Cache-Control': 'no-store',

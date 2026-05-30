@@ -10,8 +10,8 @@ import { useEffect, useState } from 'react';
  * `setInterval` and updates in place. If a poll fails or the upstream
  * returned a `stale: true` marker, a small "stale" badge appears.
  *
- * The parent server component (`app/(admin)/page.tsx`) seeds `initialData`
- * with the freshest server-side fetch so the first paint is never empty.
+ * The parent dashboard page can seed `initialData`; when it passes `null`,
+ * this component fills itself from the cached credits API on mount.
  */
 
 export interface CreditsSnapshot {
@@ -112,7 +112,7 @@ export default function CreditsLive({
         </div>
         <p className="mt-3 text-sm text-zinc-500">
           {stale
-            ? 'No credit data available. Check OPENROUTER_API_KEY and try again.'
+            ? 'No credit data available. Check the OpenRouter server key and try again.'
             : 'Fetching balance…'}
         </p>
       </div>

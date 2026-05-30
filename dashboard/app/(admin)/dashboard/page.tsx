@@ -3,7 +3,7 @@ import { getServiceClient } from '@/lib/supabase-admin';
 import type { ActivityLogEntry } from '@/lib/types';
 
 /**
- * Admin home page.
+ * Admin dashboard overview.
  *
  * Server-rendered. Performs a single fast server-side fetch (recent activity
  * from Supabase) and renders immediately. The OpenRouter credit balance is
@@ -55,7 +55,7 @@ function statusBadgeClass(status: ActivityLogEntry['status']): string {
     : 'inline-block rounded bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-rose-400';
 }
 
-export default async function HomePage(): Promise<React.ReactElement> {
+export default async function DashboardHomePage(): Promise<React.ReactElement> {
   const activity = await loadRecentActivity();
 
   return (

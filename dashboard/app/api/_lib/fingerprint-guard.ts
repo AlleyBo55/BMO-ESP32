@@ -2,7 +2,7 @@ import 'server-only';
 
 import { verify as argonVerify } from '@node-rs/argon2';
 
-import { getServiceClient } from '@/lib/supabase-admin';
+import { getConfig } from '@/lib/config';
 
 /**
  * X-BMO-Fingerprint guard for firmware-facing API routes.
@@ -15,42 +15,13 @@ import { getServiceClient } from '@/lib/supabase-admin';
  * NEVER log the supplied or stored fingerprint value. Only emit
  * `result.reason` ("missing" | "mismatch") or "ok".
  *
- * TODO(config): once `lib/config.ts` lands, replace the inline 5-second
- * cache below with `getConfig()` so cache-clear semantics are unified
- * across the codebase. Keeping the inline cache here lets task 12 ship
- * before task 9 without coupling them.
+ * The hash is loaded through `getConfig()` so fingerprint rotation uses the
+ * same 5-second cache and post-write invalidation as the rest of the config.
  */
 
-/** How long a fetched fingerprint hash stays cached, in milliseconds. */
-const CACHE_TTL_MS = 5_000;
-
-interface FingerprintHashCache {
-  hash: string;
-  fetchedAt: number;
-}
-
-let cachedHash: FingerprintHashCache | null = null;
-
 async function loadFingerprintHash(): Promise<string> {
-  const now = Date.now();
-  if (cachedHash !== null && now - cachedHash.fetchedAt < CACHE_TTL_MS) {
-    return cachedHash.hash;
-  }
-  const supabase = getServiceClient();
-  const { data, error } = await supabase
-    .from('config')
-    .select('fingerprint_hash')
-    .eq('id', 1)
-    .maybeSingle();
-  if (error !== null) {
-    throw new Error(`fingerprint-guard config load failed: ${error.message}`);
-  }
-  const hash =
-    data !== null && typeof data.fingerprint_hash === 'string'
-      ? data.fingerprint_hash
-      : '';
-  cachedHash = { hash, fetchedAt: now };
-  return hash;
+  const cfg = await getConfig();
+  return cfg.fingerprint_hash;
 }
 
 export interface FingerprintGuardResult {
@@ -90,7 +61,7 @@ export async function verifyFingerprint(
   return { ok: true };
 }
 
-/** Test-only: clear the in-module cache so rotation tests can re-read. */
+/** Test-only compatibility hook; config cache now owns freshness. */
 export function _clearFingerprintCacheForTests(): void {
-  cachedHash = null;
+  // no-op
 }

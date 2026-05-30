@@ -22,8 +22,16 @@ namespace {
 // We use the *speaker's* I²S unit. The chip only has one. BCLK/LRC come
 // straight from main.cpp's pin map (GP0/GP1). DIN is the only mic-specific
 // pin we add here.
+//
+// PIN_MIC_DIN was GPIO8 — which is a BOOT STRAPPING pin on the ESP32-C3 (and
+// on the SuperMini it's tied to the onboard LED with a pull-up). With nothing
+// strongly driving it, the I2S input read it as a stuck-HIGH line: every
+// sample came back 0xFFFF (= -1), peak≈1, on BOTH channels regardless of
+// bit-width — i.e. "the mic captures pure silence" and STT got an empty
+// transcript. Moving the mic SD/DOUT wire to GPIO5 (a free, non-strapping pin)
+// fixes it. GPIO9 is also a strapping pin — do not use it for this.
 constexpr i2s_port_t MIC_I2S_PORT = I2S_NUM_0;
-constexpr int        PIN_MIC_DIN  = 8;
+constexpr int        PIN_MIC_DIN  = 5;
 
 constexpr int PIN_I2S_BCLK_SHARED = 0;
 constexpr int PIN_I2S_LRC_SHARED  = 1;
@@ -31,24 +39,22 @@ constexpr int PIN_I2S_DOUT_SHARED = 2;
 
 constexpr uint32_t MIC_SAMPLE_RATE_HZ = 16000;
 
-// 96 KB scratch buffer for the captured WAV body. Lives in BSS.
-__attribute__((aligned(4)))
-int16_t s_capture[kMicCaptureSamples];
+// Which I2S slot the INMP441 data is read from. Default ONLY_LEFT, but the
+// ESP32 controller commonly reads the opposite slot from the mic's L/R strap,
+// so micSetChannel() can flip this at runtime to find the one with signal.
+i2s_channel_fmt_t s_micChannel = I2S_CHANNEL_FMT_ONLY_LEFT;
 
 }  // namespace
 
-int16_t* micStaticBuffer() { return s_capture; }
-
-bool micBegin() {
-  // Tear down the speaker-only driver from audioInit() so we can install a
-  // duplex one. main.cpp must be sequenced so audioInit() runs before this.
+// Installs the shared duplex I2S driver with the current s_micChannel.
+static bool installMicDriver() {
   i2s_driver_uninstall(MIC_I2S_PORT);
 
   i2s_config_t cfg = {};
   cfg.mode                = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_RX);
   cfg.sample_rate         = MIC_SAMPLE_RATE_HZ;
   cfg.bits_per_sample     = I2S_BITS_PER_SAMPLE_16BIT;
-  cfg.channel_format      = I2S_CHANNEL_FMT_ONLY_LEFT;
+  cfg.channel_format      = s_micChannel;
   cfg.communication_format= I2S_COMM_FORMAT_STAND_I2S;
   cfg.intr_alloc_flags    = ESP_INTR_FLAG_LEVEL1;
   cfg.dma_buf_count       = 4;
@@ -80,8 +86,20 @@ bool micBegin() {
   return true;
 }
 
-// INMP441 emits 16-bit samples when configured at I2S_BITS_PER_SAMPLE_16BIT
-// in the controller. We can read directly into int16_t and store as-is.
+bool micBegin() {
+  // Tear down the speaker-only driver from audioInit() so we can install a
+  // duplex one. main.cpp must be sequenced so audioInit() runs before this.
+  return installMicDriver();
+}
+
+bool micSetChannel(bool right) {
+  s_micChannel = right ? I2S_CHANNEL_FMT_ONLY_RIGHT : I2S_CHANNEL_FMT_ONLY_LEFT;
+  Serial.printf("[mic] channel -> %s\n", right ? "RIGHT" : "LEFT");
+  return installMicDriver();
+}
+
+// INMP441 capture. The mic shares the single I2S peripheral with the speaker,
+// installed at 16-bit by micBegin(). We read 16-bit frames directly.
 // `keepGoing` lets the caller stop early (e.g. on touch release).
 size_t micCapture(int16_t* dest, size_t maxSamples, bool (*keepGoing)()) {
   if (dest == nullptr || maxSamples == 0) return 0;

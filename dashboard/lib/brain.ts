@@ -57,7 +57,7 @@ const MIN_CAPTURE_CHARS = 8;
 /** Cap stored content so one runaway turn can't bloat a row. */
 const MAX_CAPTURE_CHARS = 8_000;
 
-export type MemoryKind = 'conversation' | 'fact' | 'note';
+export type MemoryKind = 'conversation' | 'fact' | 'note' | 'thought';
 
 /** A single recalled memory with its similarity to the query (0..1). */
 export interface RecalledMemory {
@@ -159,7 +159,9 @@ export async function recall(
         const r = row as Record<string, unknown>;
         if (typeof r.id !== 'string' || typeof r.content !== 'string') return null;
         const kind: MemoryKind =
-          r.kind === 'fact' || r.kind === 'note' ? r.kind : 'conversation';
+          r.kind === 'fact' || r.kind === 'note' || r.kind === 'thought'
+            ? r.kind
+            : 'conversation';
         return {
           id: r.id,
           kind,
@@ -193,6 +195,72 @@ export function formatRecallForPrompt(memories: RecalledMemory[]): string {
     ...lines,
     '[/MEMORY]',
   ].join('\n');
+}
+
+/* -------------------------------------------------------------------------- */
+/* recentTurns — short-term conversational history                            */
+/* -------------------------------------------------------------------------- */
+
+/** One past exchange, parsed back into child + BMO turns. */
+export interface RecentTurn {
+  child: string;
+  bmo: string;
+  createdAt: string;
+}
+
+/**
+ * Returns the most recent conversation exchanges in CHRONOLOGICAL order
+ * (oldest first), parsed from the stored "Child said / BMO replied" capture
+ * format. Unlike {@link recall}, this is a plain recency read — no embeddings,
+ * no similarity — so it gives BMO actual short-term dialogue memory: the thing
+ * that lets a follow-up like "merah" be understood as answering BMO's previous
+ * question. Always resolves; degrades to [] on any failure.
+ *
+ * `withinMinutes` bounds it to the current sitting so BMO doesn't treat a
+ * conversation from yesterday as the immediate context.
+ */
+export async function recentTurns(
+  limit = 6,
+  withinMinutes = 20,
+): Promise<RecentTurn[]> {
+  if (isRemoteBrain()) return [];
+  try {
+    const supabase = getServiceClient();
+    const sinceIso = new Date(Date.now() - withinMinutes * 60_000).toISOString();
+    const { data, error } = await supabase
+      .from('brain_memory')
+      .select('content, created_at')
+      .eq('kind', 'conversation')
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error !== null) {
+      warn('recentTurns', error.message);
+      return [];
+    }
+    if (!Array.isArray(data)) return [];
+    const turns: RecentTurn[] = [];
+    for (const row of data) {
+      if (typeof row !== 'object' || row === null) continue;
+      const r = row as Record<string, unknown>;
+      if (typeof r.content !== 'string') continue;
+      // Stored as: Child said: "..."\nBMO replied: "..."
+      const m = /Child said:\s*"([\s\S]*?)"\s*\nBMO replied:\s*"([\s\S]*?)"\s*$/.exec(
+        r.content,
+      );
+      if (m === null) continue;
+      turns.push({
+        child: m[1] ?? '',
+        bmo: m[2] ?? '',
+        createdAt: typeof r.created_at === 'string' ? r.created_at : '',
+      });
+    }
+    // DB gave newest-first; flip to oldest-first for chat history order.
+    return turns.reverse();
+  } catch (err) {
+    warn('recentTurns', err);
+    return [];
+  }
 }
 
 /* -------------------------------------------------------------------------- */

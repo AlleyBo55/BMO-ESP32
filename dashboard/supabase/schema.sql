@@ -123,8 +123,11 @@ create extension if not exists vector;
 
 create table if not exists public.brain_memory (
   id          uuid primary key default gen_random_uuid(),
+  -- 'thought' (migration 0009) is BMO's spontaneous idle musing: generated
+  -- every few minutes, spoken aloud, and captured back here so it feeds future
+  -- recall — the self-growing "inner life" loop borrowed from gbrain/OpenClaw.
   kind        text        not null default 'conversation'
-                check (kind in ('conversation', 'fact', 'note')),
+                check (kind in ('conversation', 'fact', 'note', 'thought')),
   content     text        not null check (length(content) >= 1),
   embedding   vector(1536),
   -- Salience + access bookkeeping (migration 0005): consolidation/dream-cycle

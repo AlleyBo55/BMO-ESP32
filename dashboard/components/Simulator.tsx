@@ -154,6 +154,7 @@ export default function Simulator(): React.ReactElement {
       setLlm({ state: 'running', ms: null, detail: '' });
       addLog('info', 'LLM', `POST /api/sim/brain  body={"text":"${text.slice(0, 120)}"}`);
       let replyText = '';
+      let singLyrics: string | null = null;
       try {
         const t0 = performance.now();
         const res = await fetch('/api/sim/brain', {
@@ -164,6 +165,7 @@ export default function Simulator(): React.ReactElement {
         const ms = Math.round(performance.now() - t0);
         const data = (await res.json()) as {
           reply?: string;
+          sing?: string | null;
           error?: string;
           model?: string;
           memories?: RecalledMemoryView[];
@@ -179,7 +181,10 @@ export default function Simulator(): React.ReactElement {
           return;
         }
         replyText = data.reply;
-        setReply(replyText);
+        singLyrics = typeof data.sing === 'string' && data.sing.trim().length > 0 ? data.sing : null;
+        // If BMO chose to sing, the lyrics live in `sing` (reply text is
+        // often empty on a tool call). Show the lyrics as the reply.
+        setReply(singLyrics !== null ? `🎵 ${singLyrics}` : replyText);
         setMemories(Array.isArray(data.memories) ? data.memories : []);
         setBrainDebug(data.debug ?? null);
         setTokens({
@@ -189,14 +194,15 @@ export default function Simulator(): React.ReactElement {
         });
         const memNote =
           data.memoryUsed === true ? `${data.memories?.length ?? 0} memory hit(s)` : 'memory off';
+        const singNote = singLyrics !== null ? ' · 🎵 singing' : '';
         const tokNote =
           data.inputTokens != null ? ` · ${data.inputTokens}→${data.outputTokens ?? '?'} tok` : '';
         addLog(
           'ok',
           'LLM',
-          `200 in ${ms}ms · ${data.model ?? 'llm'} · ${memNote}${tokNote} · reply "${replyText.slice(0, 80)}"`,
+          `200 in ${ms}ms · ${data.model ?? 'llm'} · ${memNote}${singNote}${tokNote} · reply "${(singLyrics ?? replyText).slice(0, 80)}"`,
         );
-        setLlm({ state: 'ok', ms, detail: `${data.model ?? 'llm'} · ${memNote}${tokNote}` });
+        setLlm({ state: 'ok', ms, detail: `${data.model ?? 'llm'} · ${memNote}${singNote}${tokNote}` });
       } catch (err) {
         const m = err instanceof Error ? err.message : 'failed';
         addLog('error', 'LLM', m);
@@ -205,14 +211,21 @@ export default function Simulator(): React.ReactElement {
       }
 
       // ---- TTS ----
+      // When BMO chose to sing, voice the lyrics with the singing direction.
+      const ttsText = singLyrics !== null ? singLyrics : replyText;
+      const ttsSing = singLyrics !== null;
       setTts({ state: 'running', ms: null, detail: '' });
-      addLog('info', 'TTS', `POST /api/sim/tts  body={"text":"${replyText.slice(0, 120)}"}`);
+      addLog(
+        'info',
+        'TTS',
+        `POST /api/sim/tts  body={"text":"${ttsText.slice(0, 120)}"${ttsSing ? ',"sing":true' : ''}}`,
+      );
       try {
         const t0 = performance.now();
         const res = await fetch('/api/sim/tts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: replyText, voice }),
+          body: JSON.stringify({ text: ttsText, voice, sing: ttsSing }),
         });
         const ms = Math.round(performance.now() - t0);
         if (!res.ok) {
@@ -313,6 +326,63 @@ export default function Simulator(): React.ReactElement {
     setBusy(false);
   }, [typedText, resetStages, runBrainAndVoice, addLog]);
 
+  /**
+   * Random thought: triggers BMO's spontaneous idle musing (the gbrain /
+   * OpenClaw "think on your own" loop). On the device this fires after 5
+   * playful touches; here a button stands in for that trigger so you can hear
+   * it without hardware. Calls /api/sim/thought, which recalls memory + child
+   * profile, muses one line via gpt-4.1-mini, stores it back as a 'thought'
+   * memory, and returns a playable WAV.
+   */
+  const runRandomThought = useCallback(async (): Promise<void> => {
+    setBusy(true);
+    resetStages();
+    setStt({ state: 'skipped', ms: null, detail: 'no input — BMO thinking on its own' });
+    setLlm({ state: 'running', ms: null, detail: 'recall → muse → remember' });
+    addLog('info', 'LLM', 'POST /api/sim/thought  (spontaneous idle thought)');
+    try {
+      const t0 = performance.now();
+      const res = await fetch('/api/sim/thought', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const ms = Math.round(performance.now() - t0);
+      const thoughtHeader = res.headers.get('X-BMO-Thought-Text');
+      const thoughtText = thoughtHeader !== null ? decodeURIComponent(thoughtHeader) : '';
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string; thought?: string };
+        const shown = thoughtText.length > 0 ? thoughtText : data.thought ?? '';
+        if (shown.length > 0) setReply(`💭 ${shown}`);
+        addLog('error', 'LLM', `HTTP ${res.status} — ${data.error ?? 'unknown error'}`);
+        setLlm({ state: 'error', ms, detail: data.error ?? `HTTP ${res.status}` });
+        setTts({ state: 'error', ms: null, detail: data.error ?? 'no audio' });
+        setBusy(false);
+        return;
+      }
+      const seeds = res.headers.get('X-BMO-Thought-Seeds') ?? '0';
+      const model = res.headers.get('X-BMO-Sim-Model') ?? 'tts';
+      setReply(thoughtText.length > 0 ? `💭 ${thoughtText}` : '💭 (thought)');
+      addLog('ok', 'LLM', `200 in ${ms}ms · seeded from ${seeds} memory(ies) · "${thoughtText.slice(0, 80)}"`);
+      setLlm({ state: 'ok', ms, detail: `mused from ${seeds} memory(ies)` });
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      setAudioUrl(url);
+      addLog('ok', 'TTS', `${model} · ${(blob.size / 1024).toFixed(0)} KB WAV`);
+      setTts({ state: 'ok', ms: null, detail: `${model} · ${(blob.size / 1024).toFixed(0)} KB` });
+      window.setTimeout(() => {
+        void audioRef.current?.play().catch(() => {
+          /* autoplay may be blocked; controls remain usable */
+        });
+      }, 50);
+    } catch (err) {
+      const m = err instanceof Error ? err.message : 'failed';
+      addLog('error', 'LLM', m);
+      setLlm({ state: 'error', ms: null, detail: m });
+    }
+    setBusy(false);
+  }, [resetStages, addLog]);
+
   const startRecording = useCallback(async (): Promise<void> => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -399,6 +469,15 @@ export default function Simulator(): React.ReactElement {
               Run
             </button>
           </div>
+          <button
+            type="button"
+            onClick={() => void runRandomThought()}
+            disabled={busy || recording}
+            title="Trigger BMO's spontaneous idle thought (on the device this fires after 5 playful touches). Recalls memory, muses one line, remembers it, and speaks it."
+            className="rounded border border-violet-700 bg-violet-600/20 px-4 py-2 text-sm font-medium text-violet-200 hover:border-violet-500 hover:text-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            💭 Random thought
+          </button>
           <label className="ml-auto flex items-center gap-2 text-xs text-zinc-400">
             <span>Voice</span>
             <select
