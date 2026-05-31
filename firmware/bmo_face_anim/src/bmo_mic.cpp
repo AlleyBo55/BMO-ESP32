@@ -64,8 +64,17 @@ void micSetDecimation(uint8_t factor) {
   s_decimation = factor < 1 ? 1 : factor;
 }
 
-// Installs the shared duplex I2S driver with the current s_micChannel.
-static bool installMicDriver() {
+// Forward decl: raw capture loop, defined below micCapture().
+static size_t micCaptureRaw(int16_t* dest, size_t maxSamples, bool (*keepGoing)());
+
+static bool s_inCaptureMode = false;
+
+// Single DUPLEX (TX|RX) driver, installed ONCE in micBegin(), never
+// reinstalled — this is the exact configuration that played replies cleanly
+// before the mic data pin moved to GP5. (Reinstalling the driver per capture,
+// which I tried, is what corrupted playback.) TX and RX share the clock; we
+// just don't read RX during playback.
+static bool installDuplexDriver() {
   i2s_driver_uninstall(MIC_I2S_PORT);
 
   i2s_config_t cfg = {};
@@ -96,34 +105,53 @@ static bool installMicDriver() {
   }
   err = i2s_set_pin(MIC_I2S_PORT, &pins);
   if (err != ESP_OK) {
-    Serial.printf("[mic] set_pin (duplex) failed: %d\n",
-                  static_cast<int>(err));
+    Serial.printf("[mic] set_pin (duplex) failed: %d\n", static_cast<int>(err));
     return false;
   }
   i2s_zero_dma_buffer(MIC_I2S_PORT);
   return true;
 }
 
+// Before playback: stop the peripheral, flush DMA, restart — this clears any
+// RX data the just-finished capture left queued, so the reply starts clean.
+// Cheap and does NOT reinstall the driver.
+static void enterPlaybackMode() {
+  if (!s_inCaptureMode) return;
+  i2s_stop(MIC_I2S_PORT);
+  i2s_zero_dma_buffer(MIC_I2S_PORT);
+  i2s_start(MIC_I2S_PORT);
+  s_inCaptureMode = false;
+}
+
+// Before capture: flush so we don't read stale frames.
+static void enterCaptureMode() {
+  if (s_inCaptureMode) return;
+  i2s_zero_dma_buffer(MIC_I2S_PORT);
+  s_inCaptureMode = true;
+}
+
 bool micBegin() {
-  // Tear down the speaker-only driver from audioInit() so we can install a
-  // duplex one. main.cpp must be sequenced so audioInit() runs before this.
-  return installMicDriver();
+  return installDuplexDriver();
 }
 
 bool micSetChannel(bool right) {
   s_micChannel = right ? I2S_CHANNEL_FMT_ONLY_RIGHT : I2S_CHANNEL_FMT_ONLY_LEFT;
   Serial.printf("[mic] channel -> %s\n", right ? "RIGHT" : "LEFT");
-  return installMicDriver();
+  return installDuplexDriver();
 }
 
-// INMP441 capture. The mic shares the single I2S peripheral with the speaker,
-// installed at 16-bit by micBegin(). We read 16-bit frames and keep every
-// s_decimation-th sample, so `dest` ends up holding micEffectiveRate() audio.
-// `maxSamples` is counted in OUTPUT (post-decimation) samples, i.e. the
-// destination buffer capacity. `keepGoing` lets the caller stop early.
+// Public: called by the brain glue to gate the mic around playback.
+void micPlaybackMode() { enterPlaybackMode(); }
+void micCaptureMode()  { enterCaptureMode(); }
+
 size_t micCapture(int16_t* dest, size_t maxSamples, bool (*keepGoing)()) {
   if (dest == nullptr || maxSamples == 0) return 0;
+  enterCaptureMode();
+  return micCaptureRaw(dest, maxSamples, keepGoing);
+}
 
+// Raw capture loop (assumes the driver is installed).
+static size_t micCaptureRaw(int16_t* dest, size_t maxSamples, bool (*keepGoing)()) {
   const uint8_t dec = s_decimation < 1 ? 1 : s_decimation;
 
   // Fast path: no decimation → read straight into dest (original behavior).

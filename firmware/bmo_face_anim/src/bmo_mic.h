@@ -51,6 +51,13 @@ void micSetDecimation(uint8_t factor);
 // this for the outgoing WAV header so STT decodes the audio at the right speed.
 uint32_t micEffectiveRate();
 
+// Gate the mic RX pin around playback. The mic + speaker share one I2S; if RX
+// keeps clocking in mic data during a reply, its FIFO overflows and corrupts
+// the speaker output into "ssk" static. Call micPlaybackMode() before playing
+// reply audio (disconnects the mic), and micCaptureMode() before recording.
+void micPlaybackMode();
+void micCaptureMode();
+
 // Captures up to `kMicCaptureSamples` samples from the mic, blocking the
 // caller. Returns the number of samples actually captured. The capture stops
 // early when:

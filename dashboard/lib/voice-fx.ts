@@ -228,18 +228,21 @@ export class RadioVoiceFx {
 }
 
 /**
- * Whether the "robotic radio" effect runs. DEFAULT OFF.
+ * Whether the "robotic radio" effect runs. DEFAULT ON.
  *
- * The effect is a lo-fi character layer (band-pass + grit). It was the source
- * of a harsh "sssk" sibilant hiss, and the stock TTS voice is already cute and
- * clear, so we ship it OFF by default. An operator who wants the lo-fi toy
- * character back sets `BMO_VOICE_FX=on` (or `1`/`true`/`yes`) in the env.
+ * The effect is a lo-fi character layer (band-pass + grit). It was once blamed
+ * for a harsh "sssk" sibilant hiss, but that turned out to be the firmware
+ * playing the HTTP chunked-transfer markers as PCM (fixed in the device's
+ * de-chunking reader). The aliasing decimator is also disabled by default
+ * (`decimate: 1`), so the effect is now clean. It ships ON to give BMO its
+ * characterful toy voice. An operator who wants the plain stock TTS voice sets
+ * `BMO_VOICE_FX=off` (or `0`/`false`/`no`) in the env.
  */
 export function radioFxEnabled(): boolean {
   const v = process.env.BMO_VOICE_FX;
-  if (typeof v !== 'string') return false;
+  if (typeof v !== 'string') return true;  // default ON when unset
   const t = v.trim().toLowerCase();
-  return t === 'on' || t === '1' || t === 'true' || t === 'yes';
+  return !(t === 'off' || t === '0' || t === 'false' || t === 'no');
 }
 
 /**

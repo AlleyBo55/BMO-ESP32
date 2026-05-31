@@ -72,10 +72,6 @@ __attribute__((aligned(4)))
 uint8_t s_body[kHeaderReserve + (kMicCaptureSamples * sizeof(int16_t)) +
                kBodySuffixLen];
 
-// Streaming response buffer. ESP32-C3 has ~320 KiB of SRAM; 4 KiB is the
-// design.md spec ("4 KiB audio chunks straight into the I2S buffer").
-constexpr size_t kAudioChunkBytes = 4096;
-
 constexpr uint32_t kConnectTimeoutMs       = 10000;
 // First-byte timeout must cover the WHOLE pre-audio pipeline on the dashboard:
 // STT → full LLM completion → TTS open, plus a possible Vercel cold start.
@@ -105,10 +101,6 @@ extern "C" void bmo_audio_push_pcm16(const uint8_t* data, size_t len)
 // Weak so the firmware provides it; in tests/no-audio builds it's a no-op.
 extern "C" void bmo_audio_reset_stream() __attribute__((weak));
 
-// Restores the speaker I2S to its default (16 kHz) rate after a reply played
-// at native 24 kHz. Weak so non-audio builds link; the firmware provides it.
-extern "C" void bmo_audio_finish_stream() __attribute__((weak));
-
 // Forward declared here so main.cpp can read the latest volume the dashboard
 // asked us to use, and apply it to g_volume. Declared via a weak C symbol so
 // the brain client doesn't have to know about main.cpp's audio internals.
@@ -122,6 +114,94 @@ void writePcm16ChunkToAudio(const uint8_t* data, size_t len) {
   // If the audio sink isn't wired yet, drop chunks silently — the test in
   // docs/HARDWARE-SMOKE-TEST.md catches this as "audio plays but it's noise".
 }
+
+// -----------------------------------------------------------------------------
+// PcmStreamSink — the de-chunking + WAV-skip fix for the "sssk" noise bug.
+//
+// THE BUG: the dashboard streams the reply as an HTTP chunked response
+// (Transfer-Encoding: chunked, a ReadableStream with no Content-Length) and
+// prepends a 44-byte WAV header. The OLD code read http.getStreamPtr()->
+// readBytes() and pushed every byte to I2S as PCM. But Arduino's HTTPClient
+// only DE-CHUNKS inside writeToStream() — never on the raw stream pointer. So
+// the firmware was playing the HTTP chunk-size markers ("<hexlen>\r\n" between
+// every ~4 KB) AND the WAV header as if they were audio samples → the periodic
+// "noise / normal / noise / normal" hiss. The browser/simulator de-chunks
+// transparently, which is why it was always clean there.
+//
+// THE FIX: feed HTTPClient::writeToStream() a custom Stream whose write() gets
+// the already-DE-CHUNKED body (exactly what the browser sees). We skip the
+// leading 44-byte WAV header, then forward pure PCM16 to the speaker. The same
+// sink also handles touch-to-interrupt and the talk-duration cap by returning
+// a short write to abort the transfer cleanly.
+// -----------------------------------------------------------------------------
+class PcmStreamSink : public Stream {
+ public:
+  explicit PcmStreamSink(bool (*keepTalking)())
+      : keepTalking_(keepTalking) {}
+
+  // Write-only sink: reads are never used by writeToStream().
+  int available() override { return 0; }
+  int read() override { return -1; }
+  int peek() override { return -1; }
+  size_t write(uint8_t b) override { return write(&b, 1); }
+
+  size_t write(const uint8_t* buffer, size_t size) override {
+    if (size == 0) return 0;
+    // Once aborted, keep returning a short write so HTTPClient stops the
+    // transfer (it retries once, then returns HTTPC_ERROR_STREAM_WRITE, which
+    // we recognise as our own clean stop via interrupted_/capped_).
+    if (aborted_) return 0;
+
+    if (firstBlock_) {
+      firstBlock_ = false;
+      talkStart_ = millis();
+    }
+
+    // Touch-to-interrupt: tap BMO mid-reply and it stops like a person who's
+    // been interrupted. Checked per ~4 KB block (HTTP_TCP_RX_BUFFER_SIZE).
+    if (keepTalking_ && !keepTalking_()) {
+      interrupted_ = true;
+      aborted_ = true;
+      return 0;
+    }
+    // Talk-duration safety cap (don't let BMO monologue forever).
+    if ((millis() - talkStart_) >= kMaxTalkMs) {
+      capped_ = true;
+      aborted_ = true;
+      return 0;
+    }
+
+    size_t off = 0;
+    // Skip the 44-byte WAV header that the dashboard prepends (only the
+    // browser needs it; the device wants raw PCM16). Spread across blocks in
+    // case the body is split, though it always arrives in the first block.
+    if (headerSkip_ > 0) {
+      const size_t s = headerSkip_ < size ? headerSkip_ : size;
+      headerSkip_ -= s;
+      off += s;
+    }
+    if (off < size) {
+      writePcm16ChunkToAudio(buffer + off, size - off);
+      totalBytes_ += (size - off);
+    }
+    return size;  // tell HTTPClient we consumed the whole block
+  }
+
+  bool interrupted() const { return interrupted_; }
+  bool capped() const { return capped_; }
+  bool sawData() const { return !firstBlock_; }
+  size_t totalBytes() const { return totalBytes_; }
+
+ private:
+  bool (*keepTalking_)();
+  size_t   headerSkip_ = kWavHeaderLen;  // 44-byte WAV header to discard
+  size_t   totalBytes_ = 0;
+  uint32_t talkStart_  = 0;
+  bool     firstBlock_  = true;
+  bool     interrupted_ = false;
+  bool     capped_      = false;
+  bool     aborted_     = false;
+};
 
 }  // namespace
 
@@ -273,76 +353,24 @@ bool BrainClient::ask(size_t pcmSampleCount) {
     }
   }
 
-  // Stream body in 4 KiB chunks straight to the I2S buffer.
-  WiFiClient* stream = http.getStreamPtr();
-  if (stream == nullptr) {
-    Serial.println("[brain] no response stream");
-    http.end();
-    emit_(BrainStatus::Error);
-    return false;
-  }
-
-  // Reset the downsampler's cross-chunk byte/phase state so this reply starts
-  // byte-aligned regardless of how the previous one ended (see the weak-symbol
-  // comment above). Skipping this is what turned the 2nd+ reply into noise.
+  // Stream the reply body through HTTPClient::writeToStream() into our custom
+  // PcmStreamSink. This is THE fix for the "sssk" noise: writeToStream()
+  // de-chunks the HTTP chunked transfer-encoding (the dashboard streams with
+  // Transfer-Encoding: chunked), so the sink receives the SAME clean body the
+  // browser sees — no chunk-size markers played as audio. The sink then skips
+  // the 44-byte WAV header and forwards pure PCM16 to the speaker.
   if (bmo_audio_reset_stream) bmo_audio_reset_stream();
 
-  uint8_t buf[kAudioChunkBytes];
-  size_t totalBytes = 0;
-  bool firstChunk = true;
-  uint32_t talkStart = 0;          // set on first audio chunk
-  bool interrupted = false;        // user tapped to stop
-  bool talkCapped = false;         // hit kMaxTalkMs
-  const uint32_t totalDeadline = requestStart + kTotalResponseTimeoutMs;
-
-  while (http.connected() && millis() < totalDeadline) {
-    // User-initiated interrupt (e.g. touch during playback). Clean stop, not
-    // an error — BMO behaves like a person who's been interrupted mid-word.
-    if (!firstChunk && shouldKeepTalkingCb_ && !shouldKeepTalkingCb_()) {
-      interrupted = true;
-      break;
-    }
-    // Talk-duration cap. Measured from the first chunk so connect/think time
-    // doesn't count against it.
-    if (!firstChunk && (millis() - talkStart) >= kMaxTalkMs) {
-      talkCapped = true;
-      break;
-    }
-
-    const size_t available = stream->available();
-    if (available == 0) {
-      delay(2);
-      continue;
-    }
-    const size_t toRead = available > sizeof(buf) ? sizeof(buf) : available;
-    const int read = stream->readBytes(buf, toRead);
-    if (read <= 0) {
-      // No more data and no longer connected — normal stream end.
-      break;
-    }
-
-    if (firstChunk) {
-      Serial.printf("[brain] streaming audio, first chunk %lums after request\n",
-                    static_cast<unsigned long>(millis() - requestStart));
-      firstChunk = false;
-      talkStart = millis();
-      emit_(BrainStatus::Talking);
-    }
-
-    writePcm16ChunkToAudio(buf, static_cast<size_t>(read));
-    totalBytes += static_cast<size_t>(read);
-  }
-
+  emit_(BrainStatus::Talking);
+  PcmStreamSink sink(shouldKeepTalkingCb_);
+  const int written = http.writeToStream(&sink);
   http.end();
 
-  // Reply finished (normal end, interrupt, cap, or timeout): restore the
-  // speaker to its default 16 kHz. reset_stream() switched it to the reply's
-  // native 24 kHz for alias-free playback; clips/jingles need 16 kHz back.
-  if (bmo_audio_finish_stream) bmo_audio_finish_stream();
+  const size_t totalBytes = sink.totalBytes();
 
   // Clean, user-initiated stop: caller plays a soft "okay!" cue + neutral
   // mood. We return true (success) so the caller doesn't show the error face.
-  if (interrupted) {
+  if (sink.interrupted()) {
     Serial.printf("[brain] talk interrupted by user after %lums, %u bytes\n",
                   static_cast<unsigned long>(millis() - requestStart),
                   static_cast<unsigned>(totalBytes));
@@ -351,7 +379,7 @@ bool BrainClient::ask(size_t pcmSampleCount) {
   }
 
   // Hit the talk cap: also a graceful stop (BMO trails off), not an error.
-  if (talkCapped) {
+  if (sink.capped()) {
     Serial.printf("[brain] talk cap (%lums) reached, %u bytes — trailing off\n",
                   static_cast<unsigned long>(kMaxTalkMs),
                   static_cast<unsigned>(totalBytes));
@@ -359,17 +387,22 @@ bool BrainClient::ask(size_t pcmSampleCount) {
     return true;
   }
 
-  if (millis() >= totalDeadline) {
-    Serial.printf("[brain] total-response timeout after %lums, %u bytes\n",
-                  static_cast<unsigned long>(millis() - requestStart),
-                  static_cast<unsigned>(totalBytes));
+  // writeToStream() returns the number of body bytes written, or a negative
+  // HTTPClient error. A negative return AFTER we received audio is treated as
+  // a normal end-of-stream (the server closed the connection); only treat it
+  // as an error if we never got any audio at all.
+  if (written < 0 && !sink.sawData()) {
+    Serial.printf("[brain] writeToStream error %d, no audio received after %lums\n",
+                  written,
+                  static_cast<unsigned long>(millis() - requestStart));
     emit_(BrainStatus::Error);
     return false;
   }
 
-  Serial.printf("[brain] stream ended after %lums, %u bytes\n",
+  Serial.printf("[brain] stream ended after %lums, %u bytes (writeToStream=%d)\n",
                 static_cast<unsigned long>(millis() - requestStart),
-                static_cast<unsigned>(totalBytes));
+                static_cast<unsigned>(totalBytes),
+                written);
   emit_(BrainStatus::Idle);
   return true;
 }
@@ -445,83 +478,50 @@ bool BrainClient::requestThought() {
     }
   }
 
-  WiFiClient* stream = http.getStreamPtr();
-  if (stream == nullptr) {
+  if (http.getStreamPtr() == nullptr) {
     Serial.println("[brain] (thought) no response stream");
     http.end();
     emit_(BrainStatus::Error);
     return false;
   }
 
-  // Same streaming loop as ask(): byte-align the downsampler, then pump 4 KiB
-  // chunks straight to I2S, honoring the interrupt predicate and talk cap.
+  // Same de-chunking fix as ask(): route the chunked reply through
+  // writeToStream() into the PCM sink so the device gets clean, de-chunked,
+  // header-stripped PCM16 (see PcmStreamSink for the full rationale).
   if (bmo_audio_reset_stream) bmo_audio_reset_stream();
 
-  uint8_t buf[kAudioChunkBytes];
-  size_t totalBytes = 0;
-  bool firstChunk = true;
-  uint32_t talkStart = 0;
-  bool interrupted = false;
-  bool talkCapped = false;
-  const uint32_t totalDeadline = requestStart + kTotalResponseTimeoutMs;
-
-  while (http.connected() && millis() < totalDeadline) {
-    if (!firstChunk && shouldKeepTalkingCb_ && !shouldKeepTalkingCb_()) {
-      interrupted = true;
-      break;
-    }
-    if (!firstChunk && (millis() - talkStart) >= kMaxTalkMs) {
-      talkCapped = true;
-      break;
-    }
-
-    const size_t available = stream->available();
-    if (available == 0) {
-      delay(2);
-      continue;
-    }
-    const size_t toRead = available > sizeof(buf) ? sizeof(buf) : available;
-    const int read = stream->readBytes(buf, toRead);
-    if (read <= 0) break;
-
-    if (firstChunk) {
-      Serial.printf("[brain] (thought) streaming audio, first chunk %lums after request\n",
-                    static_cast<unsigned long>(millis() - requestStart));
-      firstChunk = false;
-      talkStart = millis();
-      emit_(BrainStatus::Talking);
-    }
-
-    writePcm16ChunkToAudio(buf, static_cast<size_t>(read));
-    totalBytes += static_cast<size_t>(read);
-  }
-
+  emit_(BrainStatus::Talking);
+  PcmStreamSink sink(shouldKeepTalkingCb_);
+  const int written = http.writeToStream(&sink);
   http.end();
 
-  if (interrupted) {
+  const size_t totalBytes = sink.totalBytes();
+
+  if (sink.interrupted()) {
     Serial.printf("[brain] (thought) interrupted by user after %lums, %u bytes\n",
                   static_cast<unsigned long>(millis() - requestStart),
                   static_cast<unsigned>(totalBytes));
     emit_(BrainStatus::Idle);
     return true;
   }
-  if (talkCapped) {
+  if (sink.capped()) {
     Serial.printf("[brain] (thought) talk cap reached, %u bytes — trailing off\n",
                   static_cast<unsigned>(totalBytes));
     emit_(BrainStatus::Idle);
     return true;
   }
-  if (millis() >= totalDeadline) {
-    Serial.printf("[brain] (thought) total-response timeout after %lums, %u bytes\n",
-                  static_cast<unsigned long>(millis() - requestStart),
-                  static_cast<unsigned>(totalBytes));
+  if (written < 0 && !sink.sawData()) {
+    Serial.printf("[brain] (thought) writeToStream error %d, no audio after %lums\n",
+                  written,
+                  static_cast<unsigned long>(millis() - requestStart));
     emit_(BrainStatus::Error);
     return false;
   }
 
-  Serial.printf("[brain] (thought) stream ended after %lums, %u bytes\n",
+  Serial.printf("[brain] (thought) stream ended after %lums, %u bytes (writeToStream=%d)\n",
                 static_cast<unsigned long>(millis() - requestStart),
-                static_cast<unsigned>(totalBytes));
+                static_cast<unsigned>(totalBytes),
+                written);
   emit_(BrainStatus::Idle);
   return true;
 }

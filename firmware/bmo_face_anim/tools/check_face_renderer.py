@@ -116,7 +116,7 @@ def main() -> None:
     require("s.listeningMarks" in draw_body and "fbDrawListeningMarks" in draw_body,
             "drawFaceToBuffer() should render listening marks from FaceState")
     require("s.thinkingDots" in draw_body and "fbDrawThinkingDots" in draw_body,
-            "drawFaceToBuffer() should render thinking dots from FaceState")
+            "drawFaceToBuffer() should still support the optional thinking-pips overlay")
     open_mouth_body = extract_function_body(source, "static void fbDrawOpenMouth(")
     bmo_mouth_body = extract_function_body(source, "static void fbDrawBmoMouth(")
     require("fbDrawOpenMouth" in draw_body and "C_SHINE" in bmo_mouth_body,
@@ -124,15 +124,38 @@ def main() -> None:
     require("fbDrawBmoMouth" in open_mouth_body and "C_MOUTH" in bmo_mouth_body,
             "open mouth should use the BMO dark-green mouth helper")
     shades_body = extract_function_body(source, "static void fbDrawShades(")
-    require("leftCx  - 26" in shades_body and "rightCx + 26" in shades_body,
-            "Viper shades should be an oversized wraparound shield lens")
-    require("noseX" in shades_body and "center nose notch" in shades_body,
-            "Viper shades should include the small dark nose cutout from the reference")
+    require("uint32_t now" in source[source.find("static void fbDrawShades("):source.find("static void fbDrawZigzag(")],
+            "Viper shades should receive time so the mirror finish can animate")
+    require("real Viper shield visor" in shades_body and "kViperShieldInset" in shades_body,
+            "Viper shades should use a row-scanned one-piece shield mask")
+    require("leftCx  - 25" in shades_body and "rightCx + 25" in shades_body
+            and "const int h   = 39;" in shades_body,
+            "Viper shades should use wider, taller real-shield lens proportions")
+    require("C_LENS_EDGE" in shades_body and "orange brow frame" in shades_body,
+            "Viper shades should have a visible orange brow frame and wrap edge reflections")
+    require("mirror sweep" in shades_body and "now / 38" in shades_body,
+            "Viper shades should animate a moving mirror sweep")
+    require("noseX" in shades_body and "background nose cutout" in shades_body
+            and "g_frameBg" in shades_body,
+            "Viper shades should carve a background-colored center nose cutout")
     require("C_LENS_SKY" in shades_body and "C_LENS_AQUA" in shades_body
-            and "C_LENS_TEAL" in shades_body and "C_LENS_NAVY" in shades_body,
+            and "C_LENS_TEAL" in shades_body and "C_LENS_DEEP" in shades_body,
             "Viper shades should use stacked blue/cyan/teal mirror bands")
-    require("upper swept-back arms" in shades_body and "lower swept-back arms" in shades_body,
-            "Viper shades should have thick swept-back side arms")
+    require("side temple ticks" in shades_body and "wrap cheek panels" in shades_body,
+            "Viper shades should use small temples plus subtle wrap panels")
+    require("static void fbDrawSpinnerEye(" in source,
+            "thinking should have a dedicated loading-spinner eye primitive")
+    require("EYE_SPINNER" in draw_body and "fbDrawSpinnerEye" in draw_body,
+            "drawFaceToBuffer() should render the spinner eye shape")
+    thinking_dots_body = extract_function_body(source, "static void fbDrawThinkingDots(")
+    require("static void fbDrawThinkingPips(" in source
+            and "fbDrawThinkingPips(now);" in thinking_dots_body,
+            "legacy thinking pips helper should remain available for overlays")
+    require("thought cloud" not in source and "cloud lobes" not in source,
+            "thinking should avoid the large cloud sticker")
+    require("static const Scene script[] = {\n    { MOOD_COOL" in source
+            and "{ MOOD_THINKING, 2600 }" in source,
+            "demo loop should show Viper and thinking immediately after reset")
 
     play_mood_start = source.find("static void playMood(")
     require(play_mood_start >= 0, "missing playMood()")
@@ -160,8 +183,17 @@ def main() -> None:
             "talk mood should drive three mouth phases")
     require("listeningMarks = true" in listen_body and "mouthOpen" in listen_body,
             "listening mood should show active listening marks and a small attentive mouth")
-    require("thinkingDots = true" in thinking_body and "pupilDy = -2" in thinking_body,
-            "thinking mood should show processing dots and an up-looking gaze")
+    require("EYE_SPINNER" in thinking_body and "thinkingDots = true" not in thinking_body,
+            "thinking mood should use spinner eyes instead of floating thinking pips")
+    render_brain_start = source.rfind("static void renderBrainStatusFrame(")
+    require(render_brain_start >= 0, "missing renderBrainStatusFrame()")
+    brain_thinking_start = source.find("case bmo::BrainStatus::Thinking:", render_brain_start)
+    brain_talking_start = source.find("case bmo::BrainStatus::Talking:", brain_thinking_start)
+    require(brain_thinking_start >= 0 and brain_talking_start > brain_thinking_start,
+            "renderBrainStatusFrame() should define thinking before talking")
+    brain_thinking_body = source[brain_thinking_start:brain_talking_start]
+    require("EYE_SPINNER" in brain_thinking_body and "thinkingDots = true" not in brain_thinking_body,
+            "live brain thinking status should use spinner eyes instead of floating pips")
     require("EYE_CRESCENT" in happy_body,
             "happy mood should use crescent eyes")
     require("EYE_CRESCENT" in laugh_body,
