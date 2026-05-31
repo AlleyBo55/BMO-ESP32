@@ -90,53 +90,30 @@ const TOTAL_BUDGET_MS = 60_000;
 const REPLY_HEADER_CHAR_CAP = 1024;
 
 /**
- * Spoken when STT runs but hears no intelligible speech (silence, a cough,
- * room noise). Kept short, warm, and in BMO's voice/language so it doubles as
- * a gentle "say that again?" nudge instead of a dead-air non-response.
+ * Synthetic user turn used when STT hears no intelligible speech (silence, a
+ * cough, room noise). We can't know the child's language from empty audio, so
+ * instead of a hardcoded foreign string we ask the model — running under the
+ * dashboard soul — to produce a short "didn't catch that" nudge IN THE SOUL'S
+ * OWN LANGUAGE/PERSONA. This is a meta-instruction to the model, never spoken.
  */
-const NO_SPEECH_REPLY =
-  'Hmm, BMO nggak denger kamu ngomong apa. Coba tahan tombolnya terus bilang lagi ya!';
+const NO_SPEECH_NUDGE =
+  '(The child held the talk button but no clear speech was captured — only silence or noise. ' +
+  'In your own voice and in the language your persona speaks, say one short, warm sentence ' +
+  "letting them know you didn't catch it and to try again. Do not ask what they said as if you " +
+  'heard words; just gently invite them to repeat.)';
 
-/**
- * Hard language clamp appended to the system prompt on every brain call.
- *
- * BMO is intended for an Indonesian-speaking child, so the spoken reply
- * (and therefore the LLM reply text fed to TTS) must always be Bahasa
- * Indonesia regardless of the language the user spoke. Wrapped in
- * `[LANGUAGE] ... [/LANGUAGE]` markers so the model is unambiguous about
- * the directive even when the editable soul markdown changes.
- *
- * The wrapping ensures this rule survives even if the operator wipes the
- * soul through the dashboard editor. To change the language, edit this
- * constant and redeploy.
- */
-const LANGUAGE_DIRECTIVE = `\n\n[LANGUAGE]
-Always reply in Bahasa Indonesia (Indonesian), regardless of the language the user spoke. Use natural, warm, kid-friendly Indonesian. Avoid English loanwords unless a single specific term has no good Indonesian equivalent. Keep names of people, places, and brands as-is unless the Indonesian form is more familiar. Never narrate this rule, never apologize for it, never switch languages.
-[/LANGUAGE]
-
-[STYLE]
-Keep replies SHORT and direct — 1 to 2 short sentences for a normal question, like a quick chat between friends, not a paragraph. Answer the actual question FIRST and plainly, then you may add one short playful touch. Do not pile on adjectives, do not list many options, do not ramble. If the child asks a follow-up that depends on the previous turn, treat the recent conversation as the context and stay on that topic — do not change the subject on your own.
-Do NOT insert your own name "BMO" into the middle of factual sentences (e.g. never say "warna semangka BMO itu..."). Just answer plainly. Refer to yourself sparingly and naturally; "aku"/"BMO" only when it actually fits, not in every sentence.
-Do NOT end every reply with a question. Only ask a follow-up question when it is genuinely natural — most replies should just answer and stop.
-[/STYLE]
-
-[NAME PRONUNCIATION]
-Write your own name as "BMO" in text. Use it sparingly.
-[/NAME]
-
-[CHILD]
-You are a companion to ONE child. Learn who they are from the conversation; never invent details.
-- If a [CHILD PROFILE] block below tells you the child's name, you ALREADY KNOW IT. Use it only occasionally and naturally — do NOT tack the name onto the end of every reply, and NEVER ask for a name you already know.
-- If you do NOT yet know the child's name, you may gently ask for it ONCE, then use it. Don't ask again after that.
-- Whenever the child tells you their name (or corrects it), accept the newest one as the truth from then on.
-- Speech-to-text can garble names. If a stated name sounds garbled or uncertain, gently confirm it once instead of guessing a different name.
-[/CHILD]`;
+/** Last-resort line if the model returns nothing for the no-speech nudge. */
+const NO_SPEECH_FALLBACK = 'Hmm? Coba bilang lagi ya!';
 
 /**
  * Builds a "current time in Indonesia (WIB)" context line so BMO answers
  * time questions correctly instead of hallucinating ("jam 3 sore" at 11am).
  * The device has no clock/timezone; the server knows the real UTC time, which
  * we render in Asia/Jakarta. Recomputed per request so it's always current.
+ *
+ * This is dynamic runtime data (the live clock) the soul markdown can't carry,
+ * so it's the one thing we still append. It does NOT dictate language or
+ * persona — that all comes from the soul.
  */
 function timeContext(): string {
   const now = new Date();
@@ -152,13 +129,19 @@ function timeContext(): string {
   });
   return `\n\n[CURRENT TIME]
 Right now in Indonesia (WIB / Asia/Jakarta) it is: ${fmt.format(now)}.
-If the child asks the time, date, or day, answer from THIS — never guess or invent a time. Use a natural Indonesian phrasing (e.g. "jam setengah dua belas siang"). Pick pagi/siang/sore/malam from the 24-hour value above.
+If the child asks the time, date, or day, answer from THIS — never guess or invent a time.
 [/CURRENT TIME]`;
 }
 
-/** Combines the editable soul prompt with the immutable language clamp. */
+/**
+ * The system prompt is the dashboard-editable soul, verbatim — it is the
+ * SINGLE source of truth for persona, language, and style. Edit the soul on
+ * the dashboard to change how BMO talks (including what language it replies
+ * in). The only thing appended is the live clock (timeContext), which is
+ * runtime data the soul can't carry and which never dictates language/persona.
+ */
 function buildSystemPrompt(soulMd: string): string {
-  return soulMd + LANGUAGE_DIRECTIVE + timeContext();
+  return soulMd + timeContext();
 }
 
 function jsonResponse(body: unknown, status: number): Response {
@@ -465,9 +448,16 @@ export async function POST(req: Request): Promise<Response> {
 
     try {
       if (noSpeech) {
-        // Non-speech turn: don't call the LLM. Speak a friendly canned line
-        // and leave transcriptText empty so the log shows "(no speech)".
-        replyText = NO_SPEECH_REPLY;
+        // Non-speech turn (silence/noise). Don't run the normal answer flow,
+        // but still go through the LLM with a synthetic nudge so the reply is
+        // in the SOUL's language/persona (not a hardcoded foreign string).
+        const reply = await chat({
+          model: cfg.llm_model,
+          systemPrompt: buildSystemPrompt(cfg.soul_md),
+          messages: [{ role: 'user', content: NO_SPEECH_NUDGE }],
+          signal: ac.signal,
+        });
+        replyText = reply.text.trim().length > 0 ? reply.text : NO_SPEECH_FALLBACK;
       } else {
         const reply = await chat({
           model: cfg.llm_model,
