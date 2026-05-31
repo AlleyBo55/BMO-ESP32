@@ -124,9 +124,33 @@ You are a companion to ONE child. Learn who they are from the conversation; neve
 - Speech-to-text can garble names. If a stated name sounds garbled or uncertain, gently confirm it once instead of guessing a different name.
 [/CHILD]`;
 
+/**
+ * Builds a "current time in Indonesia (WIB)" context line so BMO answers
+ * time questions correctly instead of hallucinating ("jam 3 sore" at 11am).
+ * The device has no clock/timezone; the server knows the real UTC time, which
+ * we render in Asia/Jakarta. Recomputed per request so it's always current.
+ */
+function timeContext(): string {
+  const now = new Date();
+  const fmt = new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  return `\n\n[CURRENT TIME]
+Right now in Indonesia (WIB / Asia/Jakarta) it is: ${fmt.format(now)}.
+If the child asks the time, date, or day, answer from THIS — never guess or invent a time. Use a natural Indonesian phrasing (e.g. "jam setengah dua belas siang"). Pick pagi/siang/sore/malam from the 24-hour value above.
+[/CURRENT TIME]`;
+}
+
 /** Combines the editable soul prompt with the immutable language clamp. */
 function buildSystemPrompt(soulMd: string): string {
-  return soulMd + LANGUAGE_DIRECTIVE;
+  return soulMd + LANGUAGE_DIRECTIVE + timeContext();
 }
 
 function jsonResponse(body: unknown, status: number): Response {

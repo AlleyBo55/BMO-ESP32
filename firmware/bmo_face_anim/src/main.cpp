@@ -1111,6 +1111,15 @@ static uint8_t s_pcmSkipPhase    = 0;  // 0,1,2 — skip when phase == 2.
 // reset between replies by bmo_audio_reset_stream().
 static float s_aaLpState = 0.0f;
 
+// When true, reply PCM is played at its NATIVE 24 kHz (the speaker I2S is
+// reconfigured to 24 kHz for the reply) and pushed 1:1 — NO downsampling, so
+// NO aliasing. This is what kills the sibilant "sssk" hiss: the old path
+// dropped 1 of every 3 samples (24→16 kHz) with only a gentle filter, and
+// sibilant energy at 8–12 kHz folded back as harsh hiss on s/sh words.
+// Restored to 16 kHz by bmo_audio_finish_stream() so clips/jingles (baked at
+// 16 kHz) still play correctly.
+static volatile bool s_playNative24 = false;
+
 // Live talking-loudness envelope, 0.0..1.0, updated as reply/clip audio is
 // pushed to I2S. The talking face reads this so the mouth moves with the
 // ACTUAL voice (real lip-sync) instead of a canned sine wiggle. Written from
@@ -1148,10 +1157,67 @@ extern "C" void bmo_audio_reset_stream() {
   s_pcmSkipPhase    = 0;
   s_aaLpState       = 0.0f;
   g_talkLevel       = 0.0f;
+  // Switch the speaker to the reply's NATIVE 24 kHz so we play 1:1 with no
+  // downsample (no aliasing → no sibilant hiss). Restored in finish_stream().
+  s_playNative24 = true;
+  i2s_set_clk(AUDIO_I2S_PORT, 24000, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_MONO);
+}
+
+// Called by the brain client when a reply finishes (or errors). Restores the
+// speaker to the 16 kHz rate used by baked clips, jingles, and synth voices.
+extern "C" void bmo_audio_finish_stream() {
+  s_playNative24 = false;
+  i2s_set_clk(AUDIO_I2S_PORT, AUDIO_RATE, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_MONO);
 }
 
 extern "C" void bmo_audio_push_pcm16(const uint8_t* data, size_t len) {
   if (data == nullptr || len < 2) return;
+
+  // NATIVE 24 kHz path: the speaker was switched to 24 kHz in reset_stream(),
+  // so we play the reply PCM 1:1 with NO downsampling and NO aliasing. This is
+  // the real cure for the sibilant "sssk" hiss. We still apply volume, feed
+  // the lip-sync envelope, and stitch a half-sample across chunk boundaries.
+  if (s_playNative24) {
+    static int16_t nbatch[512];
+    size_t bn = 0;
+    size_t k = 0;
+    if (s_pcmHasLeftover && len >= 1) {
+      int16_t sample = static_cast<int16_t>(
+          static_cast<uint16_t>(s_pcmLeftoverByte) |
+          (static_cast<uint16_t>(data[0]) << 8));
+      s_pcmHasLeftover = false;
+      float f = (static_cast<float>(sample) / 32768.0f) * g_volume;
+      if (f > 1.0f) f = 1.0f; else if (f < -1.0f) f = -1.0f;
+      nbatch[bn++] = static_cast<int16_t>(f * 32767.0f);
+      k = 1;
+    }
+    while (k + 1 < len) {
+      int16_t sample = static_cast<int16_t>(
+          static_cast<uint16_t>(data[k]) |
+          (static_cast<uint16_t>(data[k + 1]) << 8));
+      k += 2;
+      float f = (static_cast<float>(sample) / 32768.0f) * g_volume;
+      if (f > 1.0f) f = 1.0f; else if (f < -1.0f) f = -1.0f;
+      nbatch[bn++] = static_cast<int16_t>(f * 32767.0f);
+      if (bn == sizeof(nbatch) / sizeof(nbatch[0])) {
+        talkEnvelopeFeed(nbatch, bn);
+        size_t w = 0;
+        i2s_write(AUDIO_I2S_PORT, nbatch, bn * sizeof(int16_t), &w, portMAX_DELAY);
+        bn = 0;
+      }
+    }
+    if (bn > 0) {
+      talkEnvelopeFeed(nbatch, bn);
+      size_t w = 0;
+      i2s_write(AUDIO_I2S_PORT, nbatch, bn * sizeof(int16_t), &w, portMAX_DELAY);
+    }
+    if (k < len) {
+      s_pcmLeftoverByte = data[k];
+      s_pcmHasLeftover = true;
+    }
+    return;
+  }
+
   // 24 → 16 kHz downsample by keeping 2 of every 3 input samples.
   //
   // ANTI-ALIASING: we must NOT just drop samples. The reply audio has energy
