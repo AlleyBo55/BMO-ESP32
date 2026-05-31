@@ -2695,7 +2695,7 @@ static void askBrain() {
   // resets it and keeps recording. This fixes "it stops way too fast and just
   // answers" caused by the capacitive line briefly dropping.
   constexpr uint32_t kMinCaptureMs   = 300;
-  constexpr uint32_t kMaxCaptureMs   = 8000;  // hard ceiling (buffer-bounded)
+  constexpr uint32_t kMaxCaptureMs   = 7000;  // safety ceiling; buffer (~6s) is the real cap
   constexpr uint32_t kReleaseGraceMs = 700;   // sustained-up time before we stop
   uint32_t releasedAt = 0;                    // 0 = currently held
   while (samples < pcmCapacity) {
@@ -3262,11 +3262,14 @@ void setup() {
     Serial.println("mic init failed; long-hold-to-ask will not work");
   }
 
-  // Capture at 8 kHz (decimate the shared 16 kHz I2S by 2). This doubles the
-  // push-to-talk window — ~4s of speech in the same 64 KB buffer — without
-  // growing RAM, which is what broke the TLS handshake when we tried a bigger
-  // buffer. 8 kHz is telephone quality; plenty for speech-to-text.
-  bmo::micSetDecimation(2);
+  // Capture at ~5.33 kHz (decimate the shared 16 kHz I2S by 3). This stretches
+  // the push-to-talk window to ~6s of speech in the SAME 64 KB buffer — no RAM
+  // growth, so it stays clear of the TLS handshake that broke when we tried a
+  // bigger buffer (decimation 2 gave ~4s, which users found too short).
+  // ~5.3 kHz is below telephone quality but still carries speech intelligibly,
+  // and STT (Qwen ASR) handles it fine. The WAV header sent to STT follows
+  // micEffectiveRate() automatically, so decode stays in sync.
+  bmo::micSetDecimation(3);
 
   // ── MIC SELF-TEST ────────────────────────────────────────────────────────
   // On-demand via the TICKLE gesture (3 rapid taps), not at boot — boot timing
