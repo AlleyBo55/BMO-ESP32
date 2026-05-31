@@ -32,3 +32,28 @@ describe('toSpeakableText() — BMO -> Bimo for TTS pronunciation', () => {
     );
   });
 });
+
+describe('toSpeakableText() — strips web-search citations from spoken text', () => {
+  test('markdown links collapse to their label', () => {
+    expect(
+      toSpeakableText('Cuacanya cerah [sumber](https://example.com/cuaca) hari ini.'),
+    ).toBe('Cuacanya cerah sumber hari ini.');
+  });
+
+  test('bare URLs are removed', () => {
+    expect(toSpeakableText('Lihat https://example.com/abc ya.')).toBe('Lihat ya.');
+    expect(toSpeakableText('Cek www.example.com sekarang')).toBe('Cek sekarang');
+  });
+
+  test('bracketed numeric citations are removed', () => {
+    expect(toSpeakableText('Itu benar [1] dan juga [2, 3] tentunya.')).toBe(
+      'Itu benar dan juga tentunya.',
+    );
+  });
+
+  test('citation strip still applies the Bimo rewrite', () => {
+    expect(
+      toSpeakableText('Kata BMO, cuacanya cerah [1] (https://x.com).'),
+    ).toBe('Kata Bimo, cuacanya cerah.');
+  });
+});

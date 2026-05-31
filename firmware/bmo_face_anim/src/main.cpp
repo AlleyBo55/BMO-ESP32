@@ -2687,17 +2687,32 @@ static void askBrain() {
   const uint32_t captureStart = millis();
   size_t samples = 0;
 
-  // Record while the button is held, bounded by the buffer (~3s) and a hard
-  // max so a stuck button can't hang. Stop early when the user releases —
-  // but require a short minimum so the initial press debounce doesn't end the
-  // capture before it starts.
-  constexpr uint32_t kMinCaptureMs = 300;
-  constexpr uint32_t kMaxCaptureMs = 4000;  // ~4s: 8kHz decimated audio in the same 64KB buffer
+  // Record while the button is held. Two timers bound it: a hard max (so a
+  // stuck/again-touched button can't hang) and a release-grace window so a
+  // momentary TTP223 flicker — or a natural pause between words — doesn't cut
+  // the recording mid-sentence. We only END on release once the button has
+  // stayed up for kReleaseGraceMs continuously; any re-touch within the grace
+  // resets it and keeps recording. This fixes "it stops way too fast and just
+  // answers" caused by the capacitive line briefly dropping.
+  constexpr uint32_t kMinCaptureMs   = 300;
+  constexpr uint32_t kMaxCaptureMs   = 8000;  // hard ceiling (buffer-bounded)
+  constexpr uint32_t kReleaseGraceMs = 700;   // sustained-up time before we stop
+  uint32_t releasedAt = 0;                    // 0 = currently held
   while (samples < pcmCapacity) {
     const uint32_t elapsed = millis() - captureStart;
     if (elapsed >= kMaxCaptureMs) break;
-    // Released after the minimum hold → user is done talking, send it.
-    if (elapsed >= kMinCaptureMs && !touchIsDown()) break;
+
+    if (elapsed >= kMinCaptureMs) {
+      if (!touchIsDown()) {
+        // First moment of release starts the grace timer; if it stays up for
+        // the whole grace window, the user is really done → stop.
+        if (releasedAt == 0) releasedAt = millis();
+        else if (millis() - releasedAt >= kReleaseGraceMs) break;
+      } else {
+        // Re-touched (or never really let go) → cancel the pending stop.
+        releasedAt = 0;
+      }
+    }
 
     const size_t cap = pcmCapacity - samples;
     const size_t batch = cap < 1024 ? cap : 1024;

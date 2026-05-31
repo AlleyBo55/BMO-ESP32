@@ -459,11 +459,13 @@ export async function POST(req: Request): Promise<Response> {
         });
         replyText = reply.text.trim().length > 0 ? reply.text : NO_SPEECH_FALLBACK;
       } else {
+        const webSearchSkill = cfg.skills.web_search;
         const reply = await chat({
           model: cfg.llm_model,
           systemPrompt: buildSystemPrompt(cfg.soul_md) + memoryBlock,
           messages: [...history, { role: 'user', content: transcriptText }],
           tools: buildTools(cfg, songs),
+          webSearch: webSearchSkill !== undefined && webSearchSkill.enabled,
           signal: ac.signal,
         });
         replyText = reply.text;

@@ -69,6 +69,14 @@ export interface ChatRequest {
    * is provider-specific; OpenAI defaults to "auto", which is what we want.
    */
   toolChoice?: 'auto' | 'none' | 'required';
+  /**
+   * When true, enables OpenRouter's web search plugin so the model can ground
+   * its answer in live internet results (current events, prices, "today",
+   * etc.). OpenRouter runs the search, injects the results + citations, and
+   * the model answers over them — no extra tool round-trip on our side.
+   * Wired to the `web_search` skill toggle in the brain route.
+   */
+  webSearch?: boolean;
   signal?: AbortSignal | undefined;
 }
 
@@ -238,6 +246,12 @@ export async function chat(req: ChatRequest): Promise<ChatResponse> {
   if (req.tools !== undefined && req.tools.length > 0) {
     body.tools = req.tools;
     body.tool_choice = req.toolChoice ?? 'auto';
+  }
+  if (req.webSearch === true) {
+    // OpenRouter web plugin: runs a live web search, injects results +
+    // citations into the context, and lets the model answer over them.
+    // `max_results` kept small to bound latency/cost for a kids' toy.
+    body.plugins = [{ id: 'web', max_results: 3 }];
   }
 
   let response: Response;
