@@ -336,6 +336,20 @@ static void fbDrawSpiralEye(int cx, int cy, int radius, float phase, uint16_t c)
   }
 }
 
+// Loading-spinner eye for "thinking": orbiting pixels, not a dizzy spiral.
+static void fbDrawSpinnerEye(int cx, int cy, int radius, float phase, uint16_t c) {
+  const int count = 8;
+
+  for (int i = 0; i < count; ++i) {
+    if (i > 5) continue;  // leave a rotating gap so it reads as motion
+    float a = phase - i * (6.28318f / count);
+    int x = cx + (int)(cosf(a) * radius);
+    int y = cy + (int)(sinf(a) * radius);
+    int r = (i < 2) ? 2 : 1;
+    fbFillCircle(x, y, r, c);
+  }
+}
+
 // X-shaped "knocked out" eye.
 static void fbDrawXEye(int cx, int cy, int size, uint16_t c) {
   fbLine(cx - size, cy - size, cx + size, cy + size, 3, c);
@@ -447,74 +461,113 @@ static void fbDrawZ(int cx, int cy, int size, uint16_t c) {
   fbLine(cx + size, cy - size, cx - size, cy + size, 2, c);
 }
 
-// Pit Viper-style shield visor: one oversized wraparound mirror lens across
-// both eyes (no bridge gap), a chunky top rim, swept-back temple arms, stacked
-// blue/cyan/teal bands, and the tiny center nose notch visible in the reference.
-static void fbDrawShades(int leftCx, int rightCx, int cy) {
+// Pit Viper-style real Viper shield visor: wide one-piece lens, straight
+// orange brow frame, wrapped sides, and a background nose cutout.
+static void fbDrawShades(int leftCx, int rightCx, int cy, uint32_t now) {
+  // real Viper shield visor: one-piece lens instead of two round glasses.
   // Mirror-lens palette (RGB565), tuned for a tiny ST7735 screen.
   const uint16_t C_FRAME     = 0x0000;  // black frame / brow
-  const uint16_t C_RIM       = 0xF345;  // warm coral top rim like sport frames
-  const uint16_t C_LENS_SKY  = 0x9FFF;  // pale sky-blue highlight
+  const uint16_t C_RIM       = 0xF345;  // warm coral sport-frame rim
+  const uint16_t C_RIM_HI    = 0xFD6A;  // bright rim glint
+  const uint16_t C_LENS_SKY  = 0xBFFF;  // pale sky-blue highlight
   const uint16_t C_LENS_AQUA = 0x07FF;  // bright aqua mirror
   const uint16_t C_LENS_TEAL = 0x0596;  // saturated teal
-  const uint16_t C_LENS_NAVY = 0x01AA;  // deep blue lower reflection
+  const uint16_t C_LENS_DEEP = 0x01AA;  // deep blue lower reflection
+  const uint16_t C_LENS_EDGE = 0x02B5;  // darker curved edge reflection
   const uint16_t C_STREAK    = 0xFFFF;  // white mirror glare
 
-  // Wide shield lens spanning almost the whole face, like the photo reference.
-  const int x0  = leftCx  - 26;
-  const int x1  = rightCx + 26;
+  // Wide/tall real-shield proportions: flatter top, larger wrap lens.
+  const int x0  = leftCx  - 25;
+  const int x1  = rightCx + 25;
   const int w   = x1 - x0;
-  const int top = cy - 14;
-  const int h   = 28;
+  const int top = cy - 19;
+  const int h   = 39;
   const int noseX = (leftCx + rightCx) / 2;
 
-  // Thick swept-back side arms, visible outside the lens like real Vipers.
-  // upper swept-back arms
-  fbLine(x0 + 5, top + 5, x0 - 10, top + 9, 4, C_FRAME);
-  fbLine(x1 - 5, top + 5, x1 + 10, top + 9, 4, C_FRAME);
-  // lower swept-back arms
-  fbLine(x0 + 3, top + h - 8, x0 - 8, top + h - 2, 3, C_FRAME);
-  fbLine(x1 - 3, top + h - 8, x1 + 8, top + h - 2, 3, C_FRAME);
+  // side temple ticks: tucked behind the wrap so they do not read as knobs.
+  fbLine(x0 + 6, top + 10, x0 - 2, top + 13, 2, C_FRAME);
+  fbLine(x1 - 6, top + 10, x1 + 2, top + 13, 2, C_FRAME);
 
-  // Black outline with tapered top/bottom corners, drawn as scanlines so the
-  // visor reads less like a simple rounded rectangle on the low-res panel.
-  for (int y = -2; y < h + 2; ++y) {
-    int sideInset = 0;
-    if (y < 4) sideInset = 4 - y;
-    if (y > h - 6) sideInset = y - (h - 6);
-    if (sideInset < 0) sideInset = 0;
-    fbHLine(x0 - 2 + sideInset, top + y, w + 4 - sideInset * 2, C_FRAME);
+  // Per-row shield mask: almost rectangular through the brow, then it tucks
+  // upward at the lower wrap corners like the real single-lens Viper shape.
+  static const uint8_t kViperShieldInset[h] = {
+     8,  5, 3, 1, 0, 0, 0, 0, 0, 0,
+     0,  0, 0, 0, 0, 0, 0, 0, 0, 0,
+     0,  0, 0, 0, 1, 1, 2, 2, 3, 3,
+     4,  5, 6, 7, 8, 9,10,12,14
+  };
+
+  // Black outline from the row-scanned one-piece shield mask.
+  for (int y = -1; y <= h; ++y) {
+    int yy = y;
+    if (yy < 0) yy = 0;
+    if (yy >= h) yy = h - 1;
+    int sideInset = kViperShieldInset[yy];
+    int left = x0 + sideInset - 2;
+    int right = x1 - sideInset + 2;
+    fbHLine(left, top + y, right - left + 1, C_FRAME);
   }
 
-  // Mirrored shield body: broad stacked bands mimic the blue/cyan visor in the
-  // attached Viper photo while keeping the whole lens continuous across BMO's eyes.
+  // Mirrored shield body: continuous lens across both eyes.
   for (int y = 0; y < h; ++y) {
-    int sideInset = 0;
-    if (y < 4) sideInset = 4 - y;
-    if (y > h - 6) sideInset = y - (h - 6);
+    int sideInset = kViperShieldInset[y];
 
-    uint16_t c = C_LENS_NAVY;
-    if (y < 5) {
+    uint16_t c = C_LENS_DEEP;
+    if (y < 6) {
       c = C_LENS_SKY;
-    } else if (y < 12) {
+    } else if (y < 16) {
       c = C_LENS_AQUA;
-    } else if (y < 21) {
+    } else if (y < 29) {
       c = C_LENS_TEAL;
     }
-    fbHLine(x0 + sideInset, top + y, w - sideInset * 2, c);
+    int left = x0 + sideInset;
+    int right = x1 - sideInset;
+    fbHLine(left, top + y, right - left + 1, c);
   }
 
-  // Chunky brow/rim along the top edge, with a warm frame glint like the photo.
-  fbFillRoundRect(x0 + 4, top - 2, w - 8, 5, 2, C_FRAME);
-  fbHLine(x0 + 8, top - 1, w - 16, C_RIM);
+  // Subtle wrap cheek panels make the shield feel curved around the face.
+  for (int y = 7; y < h - 8; ++y) {
+    int sideInset = kViperShieldInset[y];
+    int panelW = 3 + (y / 14);
+    fbHLine(x0 + sideInset + 2, top + y, panelW, C_LENS_EDGE);
+    fbHLine(x1 - sideInset - panelW - 1, top + y, panelW, C_LENS_EDGE);
+  }
 
-  // center nose notch: a small dark dip at the lower middle of the visor.
-  fbFillRoundRect(noseX - 5, top + h - 3, 10, 6, 2, C_FRAME);
+  // Straight orange brow frame, with a black lower lip like the reference.
+  fbFillRoundRect(x0 + 12, top - 6, w - 24, 8, 2, C_FRAME);
+  fbFillRoundRect(x0 + 15, top - 5, w - 30, 3, 1, C_RIM);
+  fbHLine(x0 + 20, top - 4, w - 40, C_RIM_HI);
+  fbHLine(x0 + 13, top + 1, w - 26, C_FRAME);
 
-  // Diagonal mirror glare streaks, lower-left to upper-right.
-  fbLine(x0 + 15, top + h - 4, x0 + 34, top + 3, 2, C_STREAK);
-  fbLine(x0 + 29, top + h - 5, x0 + 46, top + 4, 1, C_STREAK);
-  fbLine(x1 - 35, top + 4, x1 - 18, top + h - 7, 1, C_STREAK);
+  // Side frame posts are short and vertical-ish, closer to Pit Viper temples.
+  fbLine(x0 + 9, top + 5, x0 + 5, top + h - 14, 2, C_FRAME);
+  fbLine(x1 - 9, top + 5, x1 - 5, top + h - 14, 2, C_FRAME);
+
+  // background nose cutout: a tiny saddle, not a cartoon bridge notch.
+  for (int y = 0; y <= 4; ++y) {
+    int yy = top + h - 6 + y;
+    int half = 1 + (y * 3) / 4;
+    fbHLine(noseX - half - 2, yy, half * 2 + 5, C_FRAME);
+    if (y >= 2) {
+      fbHLine(noseX - half + 1, yy, half * 2 - 1, g_frameBg);
+    }
+  }
+
+  // Tiny dark saddle lip only at the bridge; the real lens has no heavy
+  // full-width bottom frame.
+  fbHLine(noseX - 6, top + h - 3, 4, C_FRAME);
+  fbHLine(noseX + 3, top + h - 3, 4, C_FRAME);
+
+  // Static diagonal reflection marks.
+  fbLine(x0 + 18, top + h - 8, x0 + 38, top + 6, 2, C_STREAK);
+  fbLine(x0 + 34, top + h - 9, x0 + 51, top + 7, 1, C_STREAK);
+  fbLine(x1 - 44, top + 7, x1 - 24, top + h - 10, 1, C_STREAK);
+
+  // Animated mirror sweep: a bright vertical slash travels across the visor
+  // during MOOD_COOL so the shades feel reflective instead of painted on.
+  const int sweep = x0 + 10 + (int)((now / 38) % (w - 20));
+  fbLine(sweep - 8, top + h - 7, sweep + 6, top + 6, 2, C_STREAK);
+  fbLine(sweep - 2, top + h - 9, sweep + 11, top + 9, 1, C_LENS_SKY);
 }
 
 // Zigzag mouth (wavy unhappy / sick line).
@@ -672,6 +725,7 @@ struct FaceState {
     EYE_HEART,
     EYE_X,
     EYE_SPIRAL,
+    EYE_SPINNER,
     EYE_HALF_WINK_L,
     EYE_HALF_WINK_R,
     EYE_DOLLAR,        // $$ pupils for greed/excited variants (unused for now)
@@ -756,14 +810,28 @@ static void fbDrawListeningMarks(uint32_t now) {
   }
 }
 
-static void fbDrawThinkingDots(uint32_t now) {
-  int phase = (int)((now / 240) % 3);
-  static const int xs[3] = { MOUTH_CX + 20, MOUTH_CX + 30, MOUTH_CX + 42 };
-  static const int ys[3] = { EYE_Y - 14,   EYE_Y - 20,   EYE_Y - 17 };
+static void fbDrawThinkingPips(uint32_t now) {
+  const int phase = (int)((now / 180) % 4);
+  const int baseX = MOUTH_CX + 22;
+  const int baseY = EYE_Y - 13;
+
+  // Small BMO thinking pips: quiet, readable, and not a giant overlay.
   for (int i = 0; i < 3; ++i) {
-    int r = 2 + (((phase + i) % 3) == 0 ? 1 : 0);
-    fbFillCircle(xs[i], ys[i], r, C_MOUTH);
+    const bool active = i == phase;
+    const int x = baseX + i * 10;
+    const int y = baseY - (active ? 3 : 0);
+    const int r = active ? 3 : 2;
+    fbFillCircle(x, y, r, C_MOUTH);
   }
+
+  // A tiny "hmm" tick that blinks once per cycle.
+  if (phase == 3) {
+    fbFillCircle(baseX + 36, baseY - 1, 1, C_MOUTH);
+  }
+}
+
+static void fbDrawThinkingDots(uint32_t now) {
+  fbDrawThinkingPips(now);
 }
 
 static void drawFaceToBuffer(const FaceState &s, uint32_t now) {
@@ -802,6 +870,12 @@ static void drawFaceToBuffer(const FaceState &s, uint32_t now) {
       fbDrawSpiralEye(rightCx, eyeY, 9, phase + 1.57f,    C_INK);
       break;
     }
+    case FaceState::EYE_SPINNER: {
+      float phase = (now % 960) / 960.0f * 6.28f;
+      fbDrawSpinnerEye(leftCx,  eyeY, 8, phase,         C_INK);
+      fbDrawSpinnerEye(rightCx, eyeY, 8, phase + 0.8f,  C_INK);
+      break;
+    }
     case FaceState::EYE_HALF_WINK_L:
       fbDrawEye(leftCx,  eyeY, EYE_W, EYE_H, 1.0f, s.pupilDx, s.pupilDy);
       fbDrawEye(rightCx, eyeY, EYE_W, EYE_H, s.lidR, s.pupilDx, s.pupilDy);
@@ -825,7 +899,7 @@ static void drawFaceToBuffer(const FaceState &s, uint32_t now) {
       break;
     }
     case FaceState::EYE_SHADES:
-      fbDrawShades(leftCx, rightCx, eyeY);
+      fbDrawShades(leftCx, rightCx, eyeY, now);
       break;
     case FaceState::EYE_SQUINT: {
       // Narrow horizontal slits for "focused" mood
@@ -1034,7 +1108,7 @@ static constexpr i2s_port_t AUDIO_I2S_PORT = I2S_NUM_0;
 // Global volume, 0.0 (mute) .. 1.0 (max). Live-tunable via setVolume().
 // A future web UI can call setVolume() over WiFi / serial to adjust live.
 // Keep the default modest because the MAX98357A's GAIN pin is at 9 dB.
-static volatile float g_volume = 0.328f;  // bumped +40% from 0.234
+static volatile float g_volume = 0.49f;   // bumped +50% from 0.328
 
 static inline void setVolume(float v) {
   if (v < 0.0f) v = 0.0f;
@@ -1106,19 +1180,8 @@ static uint8_t s_pcmLeftoverByte = 0;
 static bool    s_pcmHasLeftover  = false;
 static uint8_t s_pcmSkipPhase    = 0;  // 0,1,2 — skip when phase == 2.
 
-// Persistent one-pole low-pass state for the playback anti-alias filter (see
-// bmo_audio_push_pcm16). Carried across chunks so the filter is continuous;
-// reset between replies by bmo_audio_reset_stream().
-static float s_aaLpState = 0.0f;
-
-// When true, reply PCM is played at its NATIVE 24 kHz (the speaker I2S is
-// reconfigured to 24 kHz for the reply) and pushed 1:1 — NO downsampling, so
-// NO aliasing. This is what kills the sibilant "sssk" hiss: the old path
-// dropped 1 of every 3 samples (24→16 kHz) with only a gentle filter, and
-// sibilant energy at 8–12 kHz folded back as harsh hiss on s/sh words.
-// Restored to 16 kHz by bmo_audio_finish_stream() so clips/jingles (baked at
-// 16 kHz) still play correctly.
-static volatile bool s_playNative24 = false;
+// Persistent one-pole low-pass state for the playback anti-alias filter.
+static float   s_aaLpState       = 0.0f;
 
 // Live talking-loudness envelope, 0.0..1.0, updated as reply/clip audio is
 // pushed to I2S. The talking face reads this so the mouth moves with the
@@ -1157,77 +1220,18 @@ extern "C" void bmo_audio_reset_stream() {
   s_pcmSkipPhase    = 0;
   s_aaLpState       = 0.0f;
   g_talkLevel       = 0.0f;
-  // Switch the speaker to the reply's NATIVE 24 kHz so we play 1:1 with no
-  // downsample (no aliasing → no sibilant hiss). Restored in finish_stream().
-  s_playNative24 = true;
-  i2s_set_clk(AUDIO_I2S_PORT, 24000, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_MONO);
-}
-
-// Called by the brain client when a reply finishes (or errors). Restores the
-// speaker to the 16 kHz rate used by baked clips, jingles, and synth voices.
-extern "C" void bmo_audio_finish_stream() {
-  s_playNative24 = false;
-  i2s_set_clk(AUDIO_I2S_PORT, AUDIO_RATE, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_MONO);
 }
 
 extern "C" void bmo_audio_push_pcm16(const uint8_t* data, size_t len) {
   if (data == nullptr || len < 2) return;
-
-  // NATIVE 24 kHz path: the speaker was switched to 24 kHz in reset_stream(),
-  // so we play the reply PCM 1:1 with NO downsampling and NO aliasing. This is
-  // the real cure for the sibilant "sssk" hiss. We still apply volume, feed
-  // the lip-sync envelope, and stitch a half-sample across chunk boundaries.
-  if (s_playNative24) {
-    static int16_t nbatch[512];
-    size_t bn = 0;
-    size_t k = 0;
-    if (s_pcmHasLeftover && len >= 1) {
-      int16_t sample = static_cast<int16_t>(
-          static_cast<uint16_t>(s_pcmLeftoverByte) |
-          (static_cast<uint16_t>(data[0]) << 8));
-      s_pcmHasLeftover = false;
-      float f = (static_cast<float>(sample) / 32768.0f) * g_volume;
-      if (f > 1.0f) f = 1.0f; else if (f < -1.0f) f = -1.0f;
-      nbatch[bn++] = static_cast<int16_t>(f * 32767.0f);
-      k = 1;
-    }
-    while (k + 1 < len) {
-      int16_t sample = static_cast<int16_t>(
-          static_cast<uint16_t>(data[k]) |
-          (static_cast<uint16_t>(data[k + 1]) << 8));
-      k += 2;
-      float f = (static_cast<float>(sample) / 32768.0f) * g_volume;
-      if (f > 1.0f) f = 1.0f; else if (f < -1.0f) f = -1.0f;
-      nbatch[bn++] = static_cast<int16_t>(f * 32767.0f);
-      if (bn == sizeof(nbatch) / sizeof(nbatch[0])) {
-        talkEnvelopeFeed(nbatch, bn);
-        size_t w = 0;
-        i2s_write(AUDIO_I2S_PORT, nbatch, bn * sizeof(int16_t), &w, portMAX_DELAY);
-        bn = 0;
-      }
-    }
-    if (bn > 0) {
-      talkEnvelopeFeed(nbatch, bn);
-      size_t w = 0;
-      i2s_write(AUDIO_I2S_PORT, nbatch, bn * sizeof(int16_t), &w, portMAX_DELAY);
-    }
-    if (k < len) {
-      s_pcmLeftoverByte = data[k];
-      s_pcmHasLeftover = true;
-    }
-    return;
-  }
-
-  // 24 → 16 kHz downsample by keeping 2 of every 3 input samples.
-  //
-  // ANTI-ALIASING: we must NOT just drop samples. The reply audio has energy
-  // up to ~12 kHz (sibilants — "s"/"sh"); dropping samples folds that band
-  // back down as a harsh "sssk sssk" hiss. So every incoming 24 kHz sample is
-  // first run through a one-pole low-pass that rolls off the highs that would
-  // alias, THEN we decimate the filtered signal. Cheap (one mul/add per
-  // sample) and kills the hiss. `kAaAlpha` sets the corner (~6–7 kHz at
-  // 24 kHz): smaller = darker/smoother, larger = brighter but more hiss.
-  constexpr float kAaAlpha = 0.45f;
+  // 24 kHz -> 16 kHz downsample. We keep 2 of every 3 input samples, but
+  // instead of DROPPING the 3rd (which aliases sibilants into the harsh
+  // "sssk" hiss), we blend it into its neighbours. A running one-pole
+  // low-pass over EVERY input sample removes the >8 kHz energy that would
+  // otherwise fold back, then we decimate the smoothed signal. This is why
+  // baked pokes (native 16 kHz, no resample) were always clean but streamed
+  // 24 kHz replies hissed. Stays at 16 kHz TX — nothing else changes.
+  constexpr float kLpAlpha = 0.55f;  // ~6.5 kHz corner at 24 kHz
   uint8_t& leftoverByte = s_pcmLeftoverByte;
   bool&    hasLeftover  = s_pcmHasLeftover;
   uint8_t& skipPhase    = s_pcmSkipPhase;
@@ -1239,8 +1243,7 @@ extern "C" void bmo_audio_push_pcm16(const uint8_t* data, size_t len) {
         static_cast<uint16_t>(leftoverByte) |
         (static_cast<uint16_t>(data[0]) << 8));
     hasLeftover = false;
-    // Always filter (keeps the LPF state continuous), even on dropped samples.
-    s_aaLpState += kAaAlpha * (static_cast<float>(sample) - s_aaLpState);
+    s_aaLpState += kLpAlpha * (static_cast<float>(sample) - s_aaLpState);
     if (skipPhase != 2) {
       float f = (s_aaLpState / 32768.0f) * g_volume;
       if (f >  1.0f) f =  1.0f;
@@ -1263,9 +1266,9 @@ extern "C" void bmo_audio_push_pcm16(const uint8_t* data, size_t len) {
         (static_cast<uint16_t>(data[i + 1]) << 8));
     i += 2;
 
-    // Run EVERY sample through the anti-alias low-pass so its state stays
-    // continuous, then decimate by keeping 2 of 3.
-    s_aaLpState += kAaAlpha * (static_cast<float>(sample) - s_aaLpState);
+    // Low-pass EVERY input sample (keeps filter state continuous), then
+    // decimate the smoothed signal by keeping 2 of every 3.
+    s_aaLpState += kLpAlpha * (static_cast<float>(sample) - s_aaLpState);
 
     if (skipPhase == 2) {
       skipPhase = 0;
@@ -1885,13 +1888,10 @@ static void playMood(Mood m, uint32_t durationMs) {
         break;
       }
       case MOOD_THINKING: {
+        s.eyeShape = FaceState::EYE_SPINNER;
         s.mouth = FaceState::M_FLAT;
-        s.flatWidth = 18 + (int)(3 * sinf(now * 0.004f));
-        s.pupilDx = 2 + (int)(1 * sinf(now * 0.003f));
-        s.pupilDy = -2;
-        s.lidL = s.lidR = 0.15f + 0.08f * fabsf(sinf(now * 0.004f));
-        s.thinkingDots = true;
-        s.shakeY = (int)(1 * sinf(now * 0.002f));
+        s.flatWidth = 14 + (int)(2 * fabsf(sinf(now * 0.004f)));
+        s.shakeY = (int)(1 * sinf(now * 0.0015f));
         break;
       }
       case MOOD_SURPRISE: {
@@ -2031,9 +2031,12 @@ static void playMood(Mood m, uint32_t durationMs) {
         break;
       }
       case MOOD_COOL: {
-        // Sunglasses + smug grin, slight head bob
+        // Animated Viper visor + smug grin, with a tiny runway-model bob.
         s.eyeShape = FaceState::EYE_SHADES;
         s.mouth = FaceState::M_SMILE;
+        s.smileWidth = 50;
+        s.smileDip = 6;
+        s.shakeX = (int)(1 * sinf(now * 0.003f));
         s.shakeY = (int)(1 * sinf(now * 0.004f));
         break;
       }
@@ -2277,15 +2280,27 @@ static bool brainShouldKeepTalking() {
     g_talkInterrupted = true;
     return false;
   }
-  // The brain client calls this between every audio chunk while streaming the
-  // reply. We render the talking face HERE (cooperatively, on the main thread)
-  // rather than from faceRenderTask — on the single-core C3 a background SPI
-  // flush during streaming starves the TLS read loop and truncates the reply.
-  // Rendering between chunks keeps the stream fed. Mutex-guarded so we never
-  // draw at the same time as the background task during the phase handoff.
-  if (g_faceMutex && xSemaphoreTake(g_faceMutex, 0) == pdTRUE) {
-    renderBrainStatusFrame(millis());
-    xSemaphoreGive(g_faceMutex);
+  // Called once per de-chunked ~4 KB audio block (~12x/sec) while streaming
+  // the reply, from inside PcmStreamSink::write() — i.e. on the SAME thread
+  // that feeds I2S, serialized between blocks. We render the talking face HERE
+  // so it animates with real lip-sync (mouth tracks g_talkLevel).
+  //
+  // Why this is safe now (it wasn't before): the harsh "sssk" noise was NEVER
+  // a render/DMA timing problem — it was the HTTP chunk-size markers being
+  // played as PCM (fixed by writeToStream de-chunking). I2S TX is configured
+  // with tx_desc_auto_clear=true, so the worst a slow render can cause is a
+  // tiny SILENCE gap on underrun, never noise. We still throttle to ~12 fps so
+  // a burst of network blocks can't queue back-to-back screen flushes and
+  // nibble into the audio headroom — between renders, blocks go straight to
+  // I2S untouched.
+  static uint32_t s_lastTalkFrame = 0;
+  const uint32_t nowMs = millis();
+  if ((nowMs - s_lastTalkFrame) >= 80) {
+    if (g_faceMutex && xSemaphoreTake(g_faceMutex, 0) == pdTRUE) {
+      renderBrainStatusFrame(nowMs);
+      xSemaphoreGive(g_faceMutex);
+      s_lastTalkFrame = nowMs;
+    }
   }
   return true;
 }
@@ -2495,17 +2510,12 @@ static void renderBrainStatusFrame(uint32_t now) {
       break;
     }
     case bmo::BrainStatus::Thinking: {
-      // "Processing" look: the mouth becomes a pulsing orb/ring that breathes,
-      // eyes drift in focused thought, and a faint glitch flickers now and
-      // then like cycles being burned.
-      s.eyeShape   = FaceState::EYE_SQUINT;
-      s.pupilDx    = (int)(2 * sinf(now * 0.002f));
-      s.pupilDy    = -1;
-      s.shakeY     = (int)(0.5f * sinf(now * 0.004f));
-      s.pulseMouth = true;            // pulsing processing orb (replaces mouth)
-      s.thinkingDots = true;          // orbiting "..." beside it
-      // Occasional brief glitch burst (~every ~1.5s) for a techy stutter.
-      s.glitchShift = ((now % 1500) < 160) ? 2 : 0;
+      // Thoughtful BMO: loading-spinner eyes do the thinking animation while
+      // the mouth stays small and quiet.
+      s.eyeShape = FaceState::EYE_SPINNER;
+      s.mouth = FaceState::M_FLAT;
+      s.flatWidth = 14 + (int)(2 * fabsf(sinf(now * 0.004f)));
+      s.shakeY = (int)(1 * sinf(now * 0.0015f));
       break;
     }
     case bmo::BrainStatus::Talking: {
@@ -2758,6 +2768,10 @@ static void askBrain() {
   // window so the listening / thinking / talking face keeps animating instead
   // of freezing on a single frame during the blocking POST.
   g_talkInterrupted = false;
+  // Disconnect the mic RX pin BEFORE the reply plays. The mic + speaker share
+  // one I2S; leaving RX live during playback overflows its FIFO and corrupts
+  // the speaker output into "ssk" static (the regression after the mic fix).
+  bmo::micPlaybackMode();
   brainFaceStart();
   const bool ok = g_brain.ask(samples);
   brainFaceStop();
@@ -3090,11 +3104,6 @@ static void playReaction(TouchKind k) {
     // pupils spin up briefly then settle into closed crescents
     // ─────────────────────────────────────────────────────────────────────
     case TOUCH_TICKLE: {
-      // DIAGNOSTIC: 3 rapid taps run the mic record/playback self-test. This
-      // records both I2S channels, prints their peak levels, and plays the
-      // capture back so we can tell whether the mic is wired/working and which
-      // channel slot carries its data. Remove once the mic is confirmed good.
-      micRecordPlaybackTest();
       // Voice: clip "bmo_laugh" if available, otherwise synth
       playClipOrSynth("bmo_laugh", playBmoLaugh);
       // Phase A — burst of giggles (350ms): sharp high "ha!"
@@ -3324,6 +3333,8 @@ void setup() {
 void loop() {
   struct Scene { Mood m; uint32_t ms; };
   static const Scene script[] = {
+    { MOOD_COOL,     3600 },
+    { MOOD_THINKING, 2600 },
     { MOOD_IDLE,     2000 },
     { MOOD_BLINK,     200 },
     { MOOD_HAPPY,    1800 },
@@ -3332,7 +3343,6 @@ void loop() {
     { MOOD_LOVE,     2000 },
     { MOOD_TALK,     1800 },
     { MOOD_LISTEN,   1600 },
-    { MOOD_THINKING, 1800 },
     { MOOD_FOCUSED,  1800 },
     { MOOD_SURPRISE, 1100 },
     { MOOD_EXCITED,  1800 },
@@ -3347,7 +3357,6 @@ void loop() {
     { MOOD_BORED,    2000 },
     { MOOD_SAD,      2000 },
     { MOOD_ANGRY,    1600 },
-    { MOOD_COOL,     2000 },
     { MOOD_WAKE,     1800 },
     { MOOD_SLEEPY,   2200 },
   };

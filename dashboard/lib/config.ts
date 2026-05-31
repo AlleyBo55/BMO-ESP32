@@ -75,7 +75,7 @@ function makeDefaultRow(): Omit<BmoConfig, 'updated_at'> {
     stt_model: 'qwen/qwen3-asr-flash-2026-02-10',
     tts_model: 'openai/gpt-audio-mini',
     tts_voice: 'fable',
-    volume: 60,
+    volume: 90,
   };
 }
 
