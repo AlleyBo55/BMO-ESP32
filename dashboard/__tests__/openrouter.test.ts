@@ -81,6 +81,58 @@ describe('chat()', () => {
     ac.abort();
     await expect(p).rejects.toThrow();
   });
+
+  test('webSearch:true adds the web plugin to the request body', async () => {
+    const or = await import('@/lib/openrouter');
+    await or.chat({
+      model: 'openai/gpt-4.1-mini',
+      systemPrompt: 's',
+      messages: [{ role: 'user', content: 'hi' }],
+      webSearch: true,
+    });
+    const body = captured[0]?.body as { plugins?: Array<{ id?: string }> } | null;
+    expect(body?.plugins?.[0]?.id).toBe('web');
+  });
+
+  test('omits plugins when webSearch is not set', async () => {
+    const or = await import('@/lib/openrouter');
+    await or.chat({
+      model: 'openai/gpt-4.1-mini',
+      systemPrompt: 's',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+    const body = captured[0]?.body as { plugins?: unknown } | null;
+    expect(body?.plugins).toBeUndefined();
+  });
+
+  test('counts url_citation annotations as webCitations', async () => {
+    server.use(
+      http.post('https://openrouter.ai/api/v1/chat/completions', () =>
+        HttpResponse.json({
+          choices: [
+            {
+              message: {
+                content: 'grounded answer',
+                annotations: [
+                  { type: 'url_citation', url: 'https://a.com' },
+                  { type: 'url_citation', url: 'https://b.com' },
+                  { type: 'file', url: 'ignored' },
+                ],
+              },
+            },
+          ],
+        }),
+      ),
+    );
+    const or = await import('@/lib/openrouter');
+    const res = await or.chat({
+      model: 'openai/gpt-4.1-mini',
+      systemPrompt: 's',
+      messages: [{ role: 'user', content: 'hi' }],
+      webSearch: true,
+    });
+    expect(res.webCitations).toBe(2);
+  });
 });
 
 describe('transcribe()', () => {

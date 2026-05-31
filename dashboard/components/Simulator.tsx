@@ -170,6 +170,8 @@ export default function Simulator(): React.ReactElement {
           model?: string;
           memories?: RecalledMemoryView[];
           memoryUsed?: boolean;
+          webSearchEnabled?: boolean;
+          webCitations?: number;
           inputTokens?: number | null;
           outputTokens?: number | null;
           costUsd?: number | null;
@@ -195,14 +197,23 @@ export default function Simulator(): React.ReactElement {
         const memNote =
           data.memoryUsed === true ? `${data.memories?.length ?? 0} memory hit(s)` : 'memory off';
         const singNote = singLyrics !== null ? ' · 🎵 singing' : '';
+        // Web-search proof: 🌐 N = the web plugin actually ran and grounded the
+        // reply with N citations; "web:no hit" = enabled but the model answered
+        // from training data; nothing when the skill is off.
+        const webNote =
+          data.webSearchEnabled === true
+            ? (data.webCitations ?? 0) > 0
+              ? ` · 🌐 ${data.webCitations} web cite(s)`
+              : ' · 🌐 web:no hit'
+            : '';
         const tokNote =
           data.inputTokens != null ? ` · ${data.inputTokens}→${data.outputTokens ?? '?'} tok` : '';
         addLog(
           'ok',
           'LLM',
-          `200 in ${ms}ms · ${data.model ?? 'llm'} · ${memNote}${singNote}${tokNote} · reply "${(singLyrics ?? replyText).slice(0, 80)}"`,
+          `200 in ${ms}ms · ${data.model ?? 'llm'} · ${memNote}${singNote}${webNote}${tokNote} · reply "${(singLyrics ?? replyText).slice(0, 80)}"`,
         );
-        setLlm({ state: 'ok', ms, detail: `${data.model ?? 'llm'} · ${memNote}${singNote}${tokNote}` });
+        setLlm({ state: 'ok', ms, detail: `${data.model ?? 'llm'} · ${memNote}${singNote}${webNote}${tokNote}` });
       } catch (err) {
         const m = err instanceof Error ? err.message : 'failed';
         addLog('error', 'LLM', m);

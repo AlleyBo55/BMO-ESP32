@@ -97,6 +97,13 @@ export interface ChatResponse {
   inputTokens?: number;
   outputTokens?: number;
   costUsd?: number;
+  /**
+   * Number of web-search citations OpenRouter attached to the reply (from the
+   * message `annotations` array, type `url_citation`). > 0 is hard proof the
+   * web plugin actually ran and grounded this answer. 0 (or undefined) means
+   * it answered from the model alone.
+   */
+  webCitations?: number;
 }
 
 export interface TranscribeRequest {
@@ -322,6 +329,18 @@ export async function chat(req: ChatRequest): Promise<ChatResponse> {
   }
 
   const out: ChatResponse = { text, toolCalls };
+
+  // Count web-search citations OpenRouter attached. The web plugin returns
+  // them on `message.annotations` as objects of type "url_citation". A count
+  // > 0 proves the search actually ran and grounded this reply.
+  if (Array.isArray(first.message.annotations)) {
+    let citations = 0;
+    for (const a of first.message.annotations) {
+      if (isRecord(a) && a.type === 'url_citation') citations += 1;
+    }
+    if (citations > 0) out.webCitations = citations;
+  }
+
   const usage = parsed.usage;
   if (isRecord(usage)) {
     if (typeof usage.prompt_tokens === 'number') out.inputTokens = usage.prompt_tokens;

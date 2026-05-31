@@ -460,15 +460,26 @@ export async function POST(req: Request): Promise<Response> {
         replyText = reply.text.trim().length > 0 ? reply.text : NO_SPEECH_FALLBACK;
       } else {
         const webSearchSkill = cfg.skills.web_search;
+        const webSearchOn = webSearchSkill !== undefined && webSearchSkill.enabled;
         const reply = await chat({
           model: cfg.llm_model,
           systemPrompt: buildSystemPrompt(cfg.soul_md) + memoryBlock,
           messages: [...history, { role: 'user', content: transcriptText }],
           tools: buildTools(cfg, songs),
-          webSearch: webSearchSkill !== undefined && webSearchSkill.enabled,
+          webSearch: webSearchOn,
           signal: ac.signal,
         });
         replyText = reply.text;
+
+        // Hard proof of whether the web plugin actually ran on this reply.
+        if (webSearchOn) {
+          const n = reply.webCitations ?? 0;
+          console.log(
+            n > 0
+              ? `[brain] web search USED — ${n} citation(s) grounded the reply`
+              : '[brain] web search enabled but NOT used (model answered from training data)',
+          );
+        }
 
         // If the model asked to sing, capture the lyrics. The singing path
         // synthesizes these with BMO's singing voice direction instead of
