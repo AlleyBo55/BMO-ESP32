@@ -6,7 +6,7 @@ import { verifyFingerprint } from '@/app/api/_lib/fingerprint-guard';
 import { writeActivityLog, type ActivityLogRow } from '@/app/api/_lib/log';
 import { getConfig } from '@/lib/config';
 import { OpenRouterError, synthesizeSpeech } from '@/lib/openrouter';
-import { BMO_SPEECH_INSTRUCTIONS, BMO_SPEECH_MODEL } from '@/lib/voice';
+import { BMO_SPEECH_INSTRUCTIONS, BMO_SPEECH_MODEL, toSpeakableText } from '@/lib/voice';
 import { applyRadioFx } from '@/lib/voice-fx';
 import { buildWavHeader } from '@/lib/wav';
 
@@ -163,7 +163,7 @@ export async function POST(req: Request): Promise<Response> {
       synthesizeSpeech({
         model: BMO_SPEECH_MODEL,
         voice,
-        text: inputText,
+        text: toSpeakableText(inputText),
         instructions: BMO_SPEECH_INSTRUCTIONS,
         signal: req.signal,
       }),

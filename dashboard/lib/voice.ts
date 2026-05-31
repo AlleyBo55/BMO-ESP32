@@ -39,6 +39,26 @@ export const RECOMMENDED_BMO_VOICE = 'fable';
 export const BMO_SPEECH_MODEL = 'openai/gpt-4o-mini-tts-2025-12-15';
 
 /**
+ * Rewrites text so a TTS engine pronounces "BMO" as "BeeMo" instead of
+ * spelling the letters "B-M-O".
+ *
+ * WHY CODE, NOT PROMPT: instructions like "pronounce BMO as Beemo" are
+ * unreliable — the model often still spells the capital letters. The only
+ * bulletproof fix is to change the actual characters we hand the TTS. We
+ * replace standalone "BMO" (and "BeeMo"/"Bee-Mo" variants, case-insensitive,
+ * not inside a larger word) with the phonetic "Bimo" — which Indonesian/English
+ * TTS reads as "BEE-moh". The on-screen reply text in the activity log keeps
+ * the canonical "BMO" spelling; only the audio input is rewritten.
+ */
+export function toSpeakableText(text: string): string {
+  // \b word boundaries so we don't touch e.g. "BMOX"; covers BMO, B.M.O,
+  // B-M-O, BeeMo, Bee-Mo. The replacement "Bimo" is the phonetic spelling.
+  return text
+    .replace(/\bB[\s.\-]?M[\s.\-]?O\b/gi, 'Bimo')
+    .replace(/\bBee[\s.\-]?Mo\b/gi, 'Bimo');
+}
+
+/**
  * Delivery direction passed as the TTS system prompt. Describes BMO's vocal
  * character so the audio model performs the line in-character instead of
  * reading it flat. Kept in English (the models follow English stage

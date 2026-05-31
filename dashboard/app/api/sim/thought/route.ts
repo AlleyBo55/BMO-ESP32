@@ -6,7 +6,7 @@ import { requireAdmin } from '@/lib/api-auth';
 import { getConfig } from '@/lib/config';
 import { OpenRouterError, synthesizeSpeech } from '@/lib/openrouter';
 import { generateThought } from '@/lib/thoughts';
-import { BMO_SPEECH_INSTRUCTIONS, BMO_SPEECH_MODEL } from '@/lib/voice';
+import { BMO_SPEECH_INSTRUCTIONS, BMO_SPEECH_MODEL, toSpeakableText } from '@/lib/voice';
 import { applyRadioFx } from '@/lib/voice-fx';
 import { wrapPcm16AsWav } from '@/lib/wav';
 
@@ -72,7 +72,7 @@ export async function POST(req: Request): Promise<Response> {
       synthesizeSpeech({
         model: BMO_SPEECH_MODEL,
         voice: cfg.tts_voice,
-        text: thought.text,
+        text: toSpeakableText(thought.text),
         instructions: BMO_SPEECH_INSTRUCTIONS,
         signal: req.signal,
       }),
