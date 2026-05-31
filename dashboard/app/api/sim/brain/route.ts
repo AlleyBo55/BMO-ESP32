@@ -95,7 +95,15 @@ export async function POST(req: Request): Promise<Response> {
     memories = await recall(userText, { signal: req.signal });
   }
   const memoryBlock = formatRecallForPrompt(memories);
-  const systemPrompt = cfg.soul_md + LANGUAGE_DIRECTIVE + memoryBlock;
+  const timeBlock = (() => {
+    const fmt = new Intl.DateTimeFormat('id-ID', {
+      timeZone: 'Asia/Jakarta',
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+    return `\n\n[CURRENT TIME]\nRight now in Indonesia (WIB) it is: ${fmt.format(new Date())}. If asked the time/date/day, answer from THIS — never guess. Pick pagi/siang/sore/malam from the 24-hour value.\n[/CURRENT TIME]`;
+  })();
+  const systemPrompt = cfg.soul_md + LANGUAGE_DIRECTIVE + timeBlock + memoryBlock;
 
   // Expose the `sing` tool to the simulator's LLM exactly as the firmware
   // route does, so the in-browser test decides to sing identically. (The

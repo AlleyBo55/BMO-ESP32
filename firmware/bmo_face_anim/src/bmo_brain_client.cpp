@@ -105,6 +105,10 @@ extern "C" void bmo_audio_push_pcm16(const uint8_t* data, size_t len)
 // Weak so the firmware provides it; in tests/no-audio builds it's a no-op.
 extern "C" void bmo_audio_reset_stream() __attribute__((weak));
 
+// Restores the speaker I2S to its default (16 kHz) rate after a reply played
+// at native 24 kHz. Weak so non-audio builds link; the firmware provides it.
+extern "C" void bmo_audio_finish_stream() __attribute__((weak));
+
 // Forward declared here so main.cpp can read the latest volume the dashboard
 // asked us to use, and apply it to g_volume. Declared via a weak C symbol so
 // the brain client doesn't have to know about main.cpp's audio internals.
@@ -330,6 +334,11 @@ bool BrainClient::ask(size_t pcmSampleCount) {
   }
 
   http.end();
+
+  // Reply finished (normal end, interrupt, cap, or timeout): restore the
+  // speaker to its default 16 kHz. reset_stream() switched it to the reply's
+  // native 24 kHz for alias-free playback; clips/jingles need 16 kHz back.
+  if (bmo_audio_finish_stream) bmo_audio_finish_stream();
 
   // Clean, user-initiated stop: caller plays a soft "okay!" cue + neutral
   // mood. We return true (success) so the caller doesn't show the error face.
