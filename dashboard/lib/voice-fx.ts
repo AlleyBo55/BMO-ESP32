@@ -227,12 +227,19 @@ export class RadioVoiceFx {
   }
 }
 
-/** True unless `BMO_VOICE_FX` is explicitly set to `off` / `0` / `false`. */
+/**
+ * Whether the "robotic radio" effect runs. DEFAULT OFF.
+ *
+ * The effect is a lo-fi character layer (band-pass + grit). It was the source
+ * of a harsh "sssk" sibilant hiss, and the stock TTS voice is already cute and
+ * clear, so we ship it OFF by default. An operator who wants the lo-fi toy
+ * character back sets `BMO_VOICE_FX=on` (or `1`/`true`/`yes`) in the env.
+ */
 export function radioFxEnabled(): boolean {
   const v = process.env.BMO_VOICE_FX;
-  if (typeof v !== 'string') return true;
+  if (typeof v !== 'string') return false;
   const t = v.trim().toLowerCase();
-  return !(t === 'off' || t === '0' || t === 'false' || t === 'no');
+  return t === 'on' || t === '1' || t === 'true' || t === 'yes';
 }
 
 /**

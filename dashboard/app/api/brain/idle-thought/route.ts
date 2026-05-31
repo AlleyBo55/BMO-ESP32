@@ -7,7 +7,7 @@ import { writeActivityLog, type ActivityLogRow } from '@/app/api/_lib/log';
 import { getConfig } from '@/lib/config';
 import { OpenRouterError, synthesizeSpeech } from '@/lib/openrouter';
 import { generateThought } from '@/lib/thoughts';
-import { BMO_SPEECH_INSTRUCTIONS, BMO_SPEECH_MODEL } from '@/lib/voice';
+import { BMO_SPEECH_INSTRUCTIONS, BMO_SPEECH_MODEL, toSpeakableText } from '@/lib/voice';
 import { applyRadioFx } from '@/lib/voice-fx';
 import { buildWavHeader } from '@/lib/wav';
 
@@ -140,7 +140,7 @@ async function handle(req: Request): Promise<Response> {
       synthesizeSpeech({
         model: BMO_SPEECH_MODEL,
         voice: cfg.tts_voice,
-        text: thoughtText,
+        text: toSpeakableText(thoughtText),
         instructions: BMO_SPEECH_INSTRUCTIONS,
         signal: ac.signal,
       }),

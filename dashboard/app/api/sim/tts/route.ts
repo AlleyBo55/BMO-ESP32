@@ -9,6 +9,7 @@ import {
   BMO_SINGING_DIRECTION,
   BMO_SPEECH_INSTRUCTIONS,
   BMO_SPEECH_MODEL,
+  toSpeakableText,
 } from '@/lib/voice';
 import { applyRadioFx } from '@/lib/voice-fx';
 import { wrapPcm16AsWav } from '@/lib/wav';
@@ -93,7 +94,7 @@ export async function POST(req: Request): Promise<Response> {
       : synthesizeSpeech({
           model: BMO_SPEECH_MODEL,
           voice,
-          text,
+          text: toSpeakableText(text),
           instructions: BMO_SPEECH_INSTRUCTIONS,
           signal: req.signal,
         });
