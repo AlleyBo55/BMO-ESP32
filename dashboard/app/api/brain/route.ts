@@ -90,6 +90,14 @@ const TOTAL_BUDGET_MS = 60_000;
 const REPLY_HEADER_CHAR_CAP = 1024;
 
 /**
+ * Spoken when STT runs but hears no intelligible speech (silence, a cough,
+ * room noise). Kept short, warm, and in BMO's voice/language so it doubles as
+ * a gentle "say that again?" nudge instead of a dead-air non-response.
+ */
+const NO_SPEECH_REPLY =
+  'Hmm, BMO nggak denger kamu ngomong apa. Coba tahan tombolnya terus bilang lagi ya!';
+
+/**
  * Hard language clamp appended to the system prompt on every brain call.
  *
  * BMO is intended for an Indonesian-speaking child, so the spoken reply
@@ -396,6 +404,14 @@ export async function POST(req: Request): Promise<Response> {
     const resolved = await resolveTranscript(req, cfg, ac.signal);
     transcriptText = resolved.text;
 
+    // Non-speech guard: when STT ran but heard nothing intelligible (silence,
+    // a cough, background noise), it returns an empty/whitespace transcript.
+    // Feeding that to the LLM produced a RANDOM reply (or an empty one that
+    // streamed no audio → "BMO didn't respond"). Flag it so we skip the LLM
+    // and speak a friendly canned line instead — BMO always says SOMETHING
+    // relevant and the firmware never gets a silent stream.
+    const noSpeech = resolved.ranStt && transcriptText.trim().length === 0;
+
     // Load the catalog only if the play_music skill is on. Saves one round
     // trip when the operator has disabled music entirely.
     const playMusicSkill = cfg.skills.play_music;
@@ -413,10 +429,11 @@ export async function POST(req: Request): Promise<Response> {
     // it already knows that's relevant to this turn, and fold it into the
     // system prompt. Gated on the `memory` skill. Fully degradable: recall()
     // returns [] on any failure, so the brain never blocks a reply.
+    // Skipped entirely on a non-speech turn (nothing to recall/answer).
     let memoryBlock = '';
     const history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
     const memorySkill = cfg.skills.memory;
-    if (memorySkill !== undefined && memorySkill.enabled) {
+    if (!noSpeech && memorySkill !== undefined && memorySkill.enabled) {
       memoryEnabled = true;
       const [memories, profileLine, turns] = await Promise.all([
         recall(transcriptText, { signal: ac.signal }),
@@ -447,32 +464,38 @@ export async function POST(req: Request): Promise<Response> {
     }
 
     try {
-      const reply = await chat({
-        model: cfg.llm_model,
-        systemPrompt: buildSystemPrompt(cfg.soul_md) + memoryBlock,
-        messages: [...history, { role: 'user', content: transcriptText }],
-        tools: buildTools(cfg, songs),
-        signal: ac.signal,
-      });
-      replyText = reply.text;
+      if (noSpeech) {
+        // Non-speech turn: don't call the LLM. Speak a friendly canned line
+        // and leave transcriptText empty so the log shows "(no speech)".
+        replyText = NO_SPEECH_REPLY;
+      } else {
+        const reply = await chat({
+          model: cfg.llm_model,
+          systemPrompt: buildSystemPrompt(cfg.soul_md) + memoryBlock,
+          messages: [...history, { role: 'user', content: transcriptText }],
+          tools: buildTools(cfg, songs),
+          signal: ac.signal,
+        });
+        replyText = reply.text;
 
-      // If the model asked to sing, capture the lyrics. The singing path
-      // synthesizes these with BMO's singing voice direction instead of
-      // speaking reply.text. Takes precedence over play_song below only if
-      // no real song was picked.
-      singLyrics = extractSingLyrics(reply.toolCalls);
+        // If the model asked to sing, capture the lyrics. The singing path
+        // synthesizes these with BMO's singing voice direction instead of
+        // speaking reply.text. Takes precedence over play_song below only if
+        // no real song was picked.
+        singLyrics = extractSingLyrics(reply.toolCalls);
 
-      // Resolve any play_song tool call to a real catalog row. We pick the
-      // first valid one and ignore the rest; the LLM can still narrate over
-      // the song via reply.text if it wants to.
-      for (const call of reply.toolCalls) {
-        if (call.name !== 'play_song') continue;
-        const argTitle = call.arguments?.title;
-        if (typeof argTitle !== 'string' || argTitle.length === 0) continue;
-        const matched = await findSongByTitle(argTitle);
-        if (matched !== null) {
-          songToPlay = matched;
-          break;
+        // Resolve any play_song tool call to a real catalog row. We pick the
+        // first valid one and ignore the rest; the LLM can still narrate over
+        // the song via reply.text if it wants to.
+        for (const call of reply.toolCalls) {
+          if (call.name !== 'play_song') continue;
+          const argTitle = call.arguments?.title;
+          if (typeof argTitle !== 'string' || argTitle.length === 0) continue;
+          const matched = await findSongByTitle(argTitle);
+          if (matched !== null) {
+            songToPlay = matched;
+            break;
+          }
         }
       }
     } catch (err) {
