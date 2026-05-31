@@ -26,6 +26,7 @@ import {
   buildSingTool,
   extractSingLyrics,
   toSpeakableText,
+  WEB_SEARCH_DIRECTIVE,
 } from '@/lib/voice';
 import { applyRadioFx } from '@/lib/voice-fx';
 import { buildWavHeader } from '@/lib/wav';
@@ -137,11 +138,12 @@ If the child asks the time, date, or day, answer from THIS — never guess or in
  * The system prompt is the dashboard-editable soul, verbatim — it is the
  * SINGLE source of truth for persona, language, and style. Edit the soul on
  * the dashboard to change how BMO talks (including what language it replies
- * in). The only thing appended is the live clock (timeContext), which is
- * runtime data the soul can't carry and which never dictates language/persona.
+ * in). Appended: the live clock (timeContext), and — only when web search is
+ * enabled — a note that the model's own knowledge may be stale so it actually
+ * uses the search results. Neither dictates language/persona.
  */
-function buildSystemPrompt(soulMd: string): string {
-  return soulMd + timeContext();
+function buildSystemPrompt(soulMd: string, webSearch: boolean): string {
+  return soulMd + timeContext() + (webSearch ? WEB_SEARCH_DIRECTIVE : '');
 }
 
 function jsonResponse(body: unknown, status: number): Response {
@@ -453,7 +455,7 @@ export async function POST(req: Request): Promise<Response> {
         // in the SOUL's language/persona (not a hardcoded foreign string).
         const reply = await chat({
           model: cfg.llm_model,
-          systemPrompt: buildSystemPrompt(cfg.soul_md),
+          systemPrompt: buildSystemPrompt(cfg.soul_md, false),
           messages: [{ role: 'user', content: NO_SPEECH_NUDGE }],
           signal: ac.signal,
         });
@@ -463,7 +465,7 @@ export async function POST(req: Request): Promise<Response> {
         const webSearchOn = webSearchSkill !== undefined && webSearchSkill.enabled;
         const reply = await chat({
           model: cfg.llm_model,
-          systemPrompt: buildSystemPrompt(cfg.soul_md) + memoryBlock,
+          systemPrompt: buildSystemPrompt(cfg.soul_md, webSearchOn) + memoryBlock,
           messages: [...history, { role: 'user', content: transcriptText }],
           tools: buildTools(cfg, songs),
           webSearch: webSearchOn,
