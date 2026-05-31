@@ -53,9 +53,34 @@ export const BMO_SPEECH_MODEL = 'openai/gpt-4o-mini-tts-2025-12-15';
 export function toSpeakableText(text: string): string {
   // \b word boundaries so we don't touch e.g. "BMOX"; covers BMO, B.M.O,
   // B-M-O, BeeMo, Bee-Mo. The replacement "Bimo" is the phonetic spelling.
-  return text
+  return stripCitations(text)
     .replace(/\bB[\s.\-]?M[\s.\-]?O\b/gi, 'Bimo')
     .replace(/\bBee[\s.\-]?Mo\b/gi, 'Bimo');
+}
+
+/**
+ * Removes web-search citation noise from text BEFORE it's spoken, so BMO never
+ * reads URLs or "[1]" markers aloud. OpenRouter's web plugin can fold sources
+ * into the reply as markdown links, bare URLs, or bracketed numbers; none of
+ * that belongs in a kid's spoken answer. The on-screen/log reply keeps the
+ * original text — only the audio path is cleaned.
+ */
+function stripCitations(text: string): string {
+  return text
+    // Markdown links [label](url) → just the label.
+    .replace(/\[([^\]]+)\]\((?:https?:\/\/|www\.)[^)]*\)/gi, '$1')
+    // Parenthesized bare URLs: "(https://x.com)" → "" (drop the whole group).
+    .replace(/\(\s*(?:https?:\/\/|www\.)[^)]*\)/gi, '')
+    // Any remaining bare URLs.
+    .replace(/\b(?:https?:\/\/|www\.)\S+/gi, '')
+    // Bracketed numeric citations like [1] or [1, 2].
+    .replace(/\[\s*\d+(?:\s*,\s*\d+)*\s*\]/g, '')
+    // Empty brackets/parens left behind by the removals above.
+    .replace(/\(\s*\)|\[\s*\]/g, '')
+    // Collapse whitespace and tidy spacing before punctuation.
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\s+([.,!?])/g, '$1')
+    .trim();
 }
 
 /**
