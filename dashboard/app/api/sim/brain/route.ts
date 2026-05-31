@@ -6,7 +6,7 @@ import { requireAdmin } from '@/lib/api-auth';
 import { captureExchange, formatRecallForPrompt, recall, type RecalledMemory } from '@/lib/brain';
 import { getConfig } from '@/lib/config';
 import { chat, OpenRouterError, type OpenRouterTool } from '@/lib/openrouter';
-import { buildSingTool, extractSingLyrics } from '@/lib/voice';
+import { buildSingTool, extractSingLyrics, WEB_SEARCH_DIRECTIVE } from '@/lib/voice';
 
 /**
  * POST /api/sim/brain — simulator LLM (brain) stage.
@@ -77,8 +77,14 @@ export async function POST(req: Request): Promise<Response> {
     return `\n\n[CURRENT TIME]\nRight now in Indonesia (WIB / Asia/Jakarta) it is: ${fmt.format(new Date())}. If asked the time/date/day, answer from THIS — never guess or invent a time.\n[/CURRENT TIME]`;
   })();
   // Soul is the single source of truth for persona/language/style (matches the
-  // firmware /api/brain route). Only the live clock is appended.
-  const systemPrompt = cfg.soul_md + timeBlock + memoryBlock;
+  // firmware /api/brain route). Only the live clock is appended — plus, when
+  // web search is on, a note that the model's own knowledge may be stale so it
+  // actually uses the live results (without it the model answers "current"
+  // questions from outdated memory and never searches).
+  const webSearchSkill = cfg.skills.web_search;
+  const webSearchOn = webSearchSkill !== undefined && webSearchSkill.enabled;
+  const systemPrompt =
+    cfg.soul_md + timeBlock + memoryBlock + (webSearchOn ? WEB_SEARCH_DIRECTIVE : '');
 
   // Expose the `sing` tool to the simulator's LLM exactly as the firmware
   // route does, so the in-browser test decides to sing identically. (The
@@ -90,8 +96,6 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   try {
-    const webSearchSkill = cfg.skills.web_search;
-    const webSearchOn = webSearchSkill !== undefined && webSearchSkill.enabled;
     const reply = await chat({
       model: cfg.llm_model,
       systemPrompt,

@@ -30,6 +30,22 @@ import type { ChatToolCall, OpenRouterTool } from '@/lib/openrouter';
 export const RECOMMENDED_BMO_VOICE = 'fable';
 
 /**
+ * Appended to the system prompt ONLY when the web_search skill is on. Without
+ * it the model trusts its own (stale) training data for "current" questions —
+ * e.g. it answered "who is the president now" with the PREVIOUS president and
+ * never searched. Telling it explicitly that its knowledge may be out of date
+ * is what makes it actually use the live web results OpenRouter injects
+ * (verified: this flips the president question to a correct, cited answer).
+ *
+ * Language- and persona-neutral, so it never fights the editable soul. Shared
+ * by both the firmware route (`/api/brain`) and the simulator (`/api/sim/brain`)
+ * so they behave identically.
+ */
+export const WEB_SEARCH_DIRECTIVE = `\n\n[CURRENT FACTS]
+Your built-in knowledge has a training cutoff and may be OUT OF DATE for anything that changes over time: who currently holds an office, title, or role; prices; schedules; sports scores; recent events; and any question with "now", "today", "latest", or "current". For those, you have live web search — rely on the web results provided and answer from THEM, not from memory. If the web results contradict what you think you know, trust the web results. Do not read out URLs or citation markers; just give the answer naturally.
+[/CURRENT FACTS]`;
+
+/**
  * Dedicated text-to-speech model used for SPOKEN replies via the
  * `/audio/speech` endpoint ({@link synthesizeSpeech}). This is a true TTS that
  * reads the input verbatim — it cannot improvise like the chat-audio model.
