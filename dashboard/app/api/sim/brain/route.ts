@@ -12,45 +12,18 @@ import { buildSingTool, extractSingLyrics } from '@/lib/voice';
  * POST /api/sim/brain — simulator LLM (brain) stage.
  *
  * Browser-facing. Runs the EXACT same cognition the firmware path runs in
- * `/api/brain` — soul system prompt + language clamp + brain-first memory
- * recall + capture — but returns the reply as JSON text instead of streaming
- * TTS audio. This lets the simulator show the recalled memories and the
- * reply text alongside a per-stage status indicator.
+ * `/api/brain` — soul system prompt (the single source of truth for persona,
+ * language, and style) + live time + brain-first memory recall + capture +
+ * web search — but returns the reply as JSON text instead of streaming TTS
+ * audio. This lets the simulator show the recalled memories and the reply text
+ * alongside a per-stage status indicator.
  *
  * Request:  `{ text: string }`
- * Response: `{ reply, ms, model, memories: [{ content, similarity }], memoryUsed }`
+ * Response: `{ reply, ms, model, memories: [...], memoryUsed, webCitations }`
  */
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-
-/**
- * Kept in sync with the firmware route's clamp. Duplicated rather than
- * exported to avoid coupling the simulator to the streaming route's module
- * (which pulls in audio-transcode + ffmpeg). If the firmware clamp changes,
- * mirror it here so the simulator reflects production behavior.
- */
-const LANGUAGE_DIRECTIVE = `\n\n[LANGUAGE]
-Always reply in Bahasa Indonesia (Indonesian), regardless of the language the user spoke. Use natural, warm, kid-friendly Indonesian. Avoid English loanwords unless a single specific term has no good Indonesian equivalent. Keep names of people, places, and brands as-is unless the Indonesian form is more familiar. Never narrate this rule, never apologize for it, never switch languages.
-[/LANGUAGE]
-
-[STYLE]
-Keep replies SHORT and direct — 1 to 2 short sentences for a normal question, like a quick chat between friends, not a paragraph. Answer the actual question FIRST and plainly, then you may add one short playful touch. Do not pile on adjectives, do not list many options, do not ramble. If the child asks a follow-up that depends on the previous turn, treat the recent conversation as the context and stay on that topic — do not change the subject on your own.
-Do NOT insert your own name "BMO" into the middle of factual sentences (e.g. never say "warna semangka BMO itu..."). Just answer plainly. Refer to yourself sparingly and naturally, not in every sentence.
-Do NOT end every reply with a question. Only ask a follow-up when it is genuinely natural — most replies should just answer and stop.
-[/STYLE]
-
-[NAME PRONUNCIATION]
-Write your own name as "BMO" in text. Use it sparingly.
-[/NAME]
-
-[CHILD]
-You are a companion to ONE child. Learn who they are from the conversation; never invent details.
-- If a [CHILD PROFILE] block below tells you the child's name, you ALREADY KNOW IT. Use it only occasionally and naturally — do NOT tack the name onto the end of every reply, and NEVER ask for a name you already know.
-- If you do NOT yet know the child's name, you may gently ask for it ONCE, then use it. Don't ask again after that.
-- Whenever the child tells you their name (or corrects it), accept the newest one as the truth from then on.
-- Speech-to-text can garble names. If a stated name sounds garbled or uncertain, gently confirm it once instead of guessing a different name.
-[/CHILD]`;
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -101,9 +74,11 @@ export async function POST(req: Request): Promise<Response> {
       weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
       hour: '2-digit', minute: '2-digit', hour12: false,
     });
-    return `\n\n[CURRENT TIME]\nRight now in Indonesia (WIB) it is: ${fmt.format(new Date())}. If asked the time/date/day, answer from THIS — never guess. Pick pagi/siang/sore/malam from the 24-hour value.\n[/CURRENT TIME]`;
+    return `\n\n[CURRENT TIME]\nRight now in Indonesia (WIB / Asia/Jakarta) it is: ${fmt.format(new Date())}. If asked the time/date/day, answer from THIS — never guess or invent a time.\n[/CURRENT TIME]`;
   })();
-  const systemPrompt = cfg.soul_md + LANGUAGE_DIRECTIVE + timeBlock + memoryBlock;
+  // Soul is the single source of truth for persona/language/style (matches the
+  // firmware /api/brain route). Only the live clock is appended.
+  const systemPrompt = cfg.soul_md + timeBlock + memoryBlock;
 
   // Expose the `sing` tool to the simulator's LLM exactly as the firmware
   // route does, so the in-browser test decides to sing identically. (The
@@ -115,13 +90,26 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   try {
+    const webSearchSkill = cfg.skills.web_search;
+    const webSearchOn = webSearchSkill !== undefined && webSearchSkill.enabled;
     const reply = await chat({
       model: cfg.llm_model,
       systemPrompt,
       messages: [{ role: 'user', content: userText }],
       tools,
+      webSearch: webSearchOn,
       signal: req.signal,
     });
+
+    // Hard proof of whether the web plugin actually ran on this reply.
+    const webCitations = reply.webCitations ?? 0;
+    if (webSearchOn) {
+      console.log(
+        webCitations > 0
+          ? `[sim/brain] web search USED — ${webCitations} citation(s) grounded the reply`
+          : '[sim/brain] web search enabled but NOT used (model answered from training data)',
+      );
+    }
 
     // Did BMO choose to sing? Surface the lyrics so the simulator can voice
     // them with the singing direction via /api/sim/tts.
@@ -142,6 +130,8 @@ export async function POST(req: Request): Promise<Response> {
         ms: Date.now() - startedAt,
         model: cfg.llm_model,
         memoryUsed: memoryEnabled,
+        webSearchEnabled: webSearchOn,
+        webCitations,
         memories: memories.map((m) => ({
           content: m.content,
           similarity: Math.round(m.similarity * 1000) / 1000,
