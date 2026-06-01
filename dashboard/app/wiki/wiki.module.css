@@ -677,6 +677,35 @@
 }
 
 @media (max-width: 980px) {
+  /* Keep the fixed nav a single predictable-height row instead of letting 7
+     uppercase links crowd/overflow. The links scroll horizontally; "BMO home"
+     stays pinned left. */
+  .nav {
+    top: 12px;
+    right: 14px;
+    left: 14px;
+    width: calc(100% - 28px);
+    gap: 14px;
+    padding: 9px 12px;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav a {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .nav a:first-child {
+    margin-right: 0;
+  }
+
   .heroStats,
   .envDeck,
   .prereqGrid,
@@ -730,22 +759,25 @@
   }
 
   .hero {
-    min-height: 55svh;
-    padding-top: 120px;
+    min-height: auto;
+    padding-top: 96px;
   }
 
+  /* Single scrolling row (no wrap) keeps the fixed bar a known height so the
+     hero's top padding lines up — the old flex-wrap grew it to 2-3 rows and
+     overlapped the title. */
   .nav {
-    flex-wrap: wrap;
-    gap: 10px 14px;
+    gap: 12px;
     border-radius: 16px;
   }
 
   .nav a {
-    font-size: 0.76rem;
+    font-size: 0.74rem;
   }
 
   .nav a:first-child {
-    width: 100%;
+    width: auto;
+    margin-right: 0;
   }
 
   .heroActions a {
@@ -753,7 +785,7 @@
   }
 
   .hero h1 {
-    font-size: 4.4rem;
+    font-size: clamp(3.4rem, 16vw, 4.4rem);
   }
 
   .hero > p {
