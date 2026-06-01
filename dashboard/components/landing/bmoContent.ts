@@ -116,7 +116,7 @@ export const FEATURES = [
     visible:
       'The face shows a glitchy listening state while recording, a pulsing thinking orb during the round-trip, and a lip-synced mouth while the reply plays.',
     implementation:
-      'Held-touch captures auto-gained 16 kHz audio sent to the brain route; streamed PCM16 feeds the I2S speaker while a live envelope drives the mouth.',
+      'Held-touch captures auto-gained low-rate mono audio (decimated so a fixed buffer holds ~6s) sent to the brain route; streamed PCM16 feeds the I2S speaker while a live envelope drives the mouth.',
   },
   {
     title: 'Tiny voice pack',
@@ -135,6 +135,24 @@ export const FEATURES = [
       'Follow-ups make sense (apple \u2192 \u201cred\u201d stays on topic), and BMO remembers the child\u2019s name \u2014 learned, never hardcoded, newest value wins.',
     implementation:
       'Recent turns are replayed as chat history; stable facts are upserted by key and recalled by vector similarity before each reply. Fully degradable.',
+  },
+  {
+    title: 'Live web search',
+    body: 'For questions that depend on current facts, BMO can look things up on the web instead of guessing from stale training data.',
+    owner: 'Brain route + OpenRouter web plugin',
+    visible:
+      'Ask "who is the president now" or "what is the weather today" and BMO answers from fresh results, not an out-of-date memory.',
+    implementation:
+      'When the web_search skill is on, the brain call enables the OpenRouter web plugin and nudges the model to trust live results; citations and URLs are stripped before the reply is spoken.',
+  },
+  {
+    title: 'Editable personality',
+    body: 'BMO\u2019s persona, tone, and reply language all come from one editable soul prompt — the single source of truth.',
+    owner: 'Soul editor + brain route',
+    visible:
+      'Change the soul on the dashboard to make BMO talk differently or reply in another language; it takes effect on the next request.',
+    implementation:
+      'The brain route sends the soul verbatim as the system prompt (plus only the live clock). No hardcoded language or style clamp overrides it.',
   },
   {
     title: 'Secure cloud bridge',
@@ -285,8 +303,8 @@ export const VOICE_PIPELINE = [
   {
     step: 'Capture',
     title: 'Hold to talk',
-    body: 'A long press (about half a second) starts a walkie-talkie recording that runs until you let go, capped near two seconds by the chip memory the secure connection also needs.',
-    detail: 'INMP441 mic, 16 kHz mono PCM, recorded straight into the request buffer with no extra copies.',
+    body: 'A long press (about half a second) starts a walkie-talkie recording that runs until you let go, with a short grace window so a finger flicker or a pause between words does not cut you off early. Length is bounded near six seconds by the chip memory the secure connection also needs.',
+    detail: 'INMP441 mic, decimated to ~5.3 kHz mono PCM so a fixed 64 KB buffer holds ~6s, recorded straight into the request buffer with no extra copies.',
   },
   {
     step: 'Auto-gain',
@@ -303,20 +321,20 @@ export const VOICE_PIPELINE = [
   {
     step: 'Understand',
     title: 'Speech to text to thought',
-    body: 'The cloud transcribes the audio, recalls relevant memory and recent turns, and asks the language model for a short in-character reply.',
-    detail: 'STT then LLM with the soul prompt, child profile, recent conversation, and semantic recall folded in.',
+    body: 'The cloud transcribes the audio, recalls relevant memory and recent turns, and asks the language model for a short in-character reply. If the question needs current facts, BMO can search the web first. If no speech was heard, it answers with a gentle "say that again" instead of guessing.',
+    detail: 'STT then LLM with the soul prompt, child profile, recent conversation, and semantic recall folded in; OpenRouter web plugin grounds current-fact questions when the web_search skill is on.',
   },
   {
     step: 'Speak',
     title: 'Read the reply verbatim',
-    body: 'The reply text is sent to an audio model that must read it exactly as written — wrapped as a script so it can never improvise a different answer than the one shown in the activity log.',
-    detail: 'gpt-audio model, verbatim-wrapped user text + narration-only direction. Streamed PCM16 back to the device.',
+    body: 'The reply text is sent to a dedicated text-to-speech model that reads it exactly as written, so the spoken audio can never improvise a different answer than the one shown in the activity log.',
+    detail: 'Dedicated /audio/speech TTS reads the text verbatim (the chat-audio model is reserved for singing). Reply streamed back as PCM16; web-search citations and URLs are stripped before it is spoken.',
   },
   {
     step: 'Play & lip-sync',
     title: 'Mouth follows the voice',
     body: 'Audio streams to the speaker chunk by chunk while a loudness meter drives the mouth, so BMO looks like it is really speaking instead of playing a sound over a frozen face.',
-    detail: 'Downsample 24 to 16 kHz to I2S; a fast-attack envelope feeds the talking-mouth animation.',
+    detail: 'The chunked-transfer reply is de-chunked and the WAV header skipped on-device (the fix for the old "sssk" static), downsampled 24 to 16 kHz to I2S; a fast-attack envelope feeds the talking-mouth animation.',
   },
 ] as const satisfies readonly VoiceStage[];
 

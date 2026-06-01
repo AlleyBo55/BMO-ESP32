@@ -21,24 +21,20 @@ export const metadata: Metadata = {
 
 const FLOW = [
   {
-    title: 'Gesture or voice starts it',
-    body: 'The TTP223 touch line or microphone capture creates a small event: tap, hold, long-hold, or speech audio.',
+    title: 'An event arrives',
+    body: 'A touch on the TTP223 pad (tap, hold, long-hold) or a microphone capture creates one small input event for the firmware to react to.',
   },
   {
-    title: 'Firmware turns it into state',
-    body: 'The ESP32-C3 maps the event to a readable mood state so the screen changes immediately.',
+    title: 'Firmware turns it into a mood',
+    body: 'The ESP32-C3 debounces and classifies the event, then maps it to a readable mood state so the screen changes immediately — no waiting on the network.',
   },
   {
     title: 'The face explains the wait',
-    body: 'Listening, thinking, and talking states are separate, so the device never looks frozen during network work.',
+    body: 'Listening, thinking, and talking are separate animated states, so during cloud work the device looks busy and alive instead of frozen.',
   },
   {
-    title: 'The brain answers',
-    body: 'For conversation, firmware sends captured audio to the brain route with its fingerprint header.',
-  },
-  {
-    title: 'Audio and memory complete the loop',
-    body: 'The reply streams back as voice while useful facts can be recalled or written into the memory layer.',
+    title: 'Local or cloud decides the response',
+    body: 'Quick gestures play instant baked clips on-device. A held-touch question goes to the cloud brain — the full voice round-trip is detailed in the Voice section above.',
   },
 ] as const;
 
@@ -89,6 +85,11 @@ const ENV_VARS = [
   {
     name: 'AUTH_SESSION_SECRET',
     source: 'openssl rand -hex 32',
+    safety: 'server only',
+  },
+  {
+    name: 'CRON_SECRET',
+    source: 'openssl rand -hex 32 (guards the dream-cycle cron)',
     safety: 'server only',
   },
 ] as const;
@@ -364,8 +365,7 @@ const LAUNCH_GUIDE = [
       'Create or prepare Supabase, Vercel, OpenRouter, and GitHub accounts.',
     ],
     command: `git clone https://github.com/AlleyBo55/BMO-ESP32.git
-cd BMO
-cd dashboard
+cd BMO-ESP32/dashboard
 npm install`,
     proof: 'The dashboard dependencies install, and PlatformIO can see the esp32c3_supermini environment.',
   },
@@ -492,6 +492,7 @@ export default function WikiPage(): React.ReactElement {
           <a href="#components">Components</a>
           <a href="#voice">Voice</a>
           <a href="#brain">Brain</a>
+          <a href="#states">Faces</a>
           <a href="#flow">Flow</a>
         </nav>
 
