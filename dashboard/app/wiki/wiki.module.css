@@ -406,6 +406,7 @@
   display: grid;
   gap: 14px;
   margin-top: 18px;
+  min-width: 0;
 }
 
 .launchCard {
@@ -413,6 +414,7 @@
   grid-template-columns: 96px minmax(0, 1fr);
   gap: 18px;
   padding: 20px;
+  min-width: 0;
 }
 
 .launchNumber {
@@ -420,6 +422,13 @@
   font-size: 4.4rem;
   font-weight: 1000;
   line-height: 0.9;
+}
+
+/* min-width:0 lets this grid column actually shrink; without it the <pre>'s
+   intrinsic (longest-line) width forces the whole card wider than the phone
+   viewport and the page scrolls sideways. */
+.launchBody {
+  min-width: 0;
 }
 
 .launchBody ul {
@@ -433,9 +442,11 @@
   color: rgba(17, 37, 31, 0.78);
   font-weight: 740;
   line-height: 1.48;
+  overflow-wrap: anywhere;
 }
 
 .launchBody pre {
+  max-width: 100%;
   overflow-x: auto;
   margin: 16px 0 0;
   border: 2px solid rgba(16, 37, 31, 0.16);
