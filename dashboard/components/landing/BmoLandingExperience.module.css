@@ -1238,6 +1238,69 @@
     grid-template-columns: 1fr;
   }
 
+  /* Stacked hero: let it grow with its content instead of being pinned to a
+     full viewport height (which left a big empty gap on tablets/iPads once the
+     two columns became one). */
+  .hero {
+    min-height: auto;
+    gap: clamp(24px, 5vw, 48px);
+    padding: 104px 0 56px;
+  }
+
+  /* The decorative ellipse is desktop-only framing; on stacked layouts its
+     negative insets caused horizontal overflow and floated over the copy. */
+  .hero::before {
+    display: none;
+  }
+
+  .heroCopy {
+    text-align: center;
+  }
+
+  .heroCopy h1 {
+    font-size: clamp(5rem, 17vw, 8rem);
+  }
+
+  .heroCopy > p:not(.microcopy) {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .heroActions {
+    justify-content: center;
+  }
+
+  /* Buttons + quest strip were absolutely positioned for the desktop stage and
+     overlapped the face on tablet/iPad. Put them back in normal flow under the
+     toy so everything stacks: face -> mood buttons -> quest progress. */
+  .toyStage {
+    min-height: 0;
+    gap: 24px;
+    grid-auto-rows: max-content;
+    justify-items: center;
+  }
+
+  .buttonDeck {
+    position: static;
+    right: auto;
+    bottom: auto;
+    transform: none;
+    width: min(560px, 100%);
+  }
+
+  .questStrip {
+    position: static;
+    bottom: auto;
+    left: auto;
+    justify-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .questStrip div {
+    justify-content: center;
+  }
+
   .featureGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1256,10 +1319,6 @@
 
   .componentSpecs {
     margin-top: 8px;
-  }
-
-  .toyStage {
-    min-height: 540px;
   }
 
   .signalArt {
@@ -1281,66 +1340,193 @@
 
 @media (max-width: 620px) {
   .topbar {
-    flex-wrap: wrap;
-    gap: 12px 18px;
-    border-radius: 16px;
-    padding: 10px 12px;
+    top: 10px;
+    right: 12px;
+    left: 12px;
+    width: calc(100% - 24px);
+    flex-wrap: nowrap;
+    gap: 10px;
+    overflow: hidden;
+    border-radius: 14px;
+    padding: 8px 10px;
+  }
+
+  .topbar::before {
+    border-width: 2px;
+    background: rgba(246, 255, 239, 0.86);
+    opacity: 1;
+  }
+
+  .brand {
+    flex: 0 0 auto;
+    gap: 8px;
+    font-size: 0.92rem;
+  }
+
+  .brandFace {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    box-shadow: 0 4px 0 rgba(16, 37, 31, 0.16);
   }
 
   .navLinks {
-    width: 100%;
-    justify-content: space-between;
+    flex: 1 1 auto;
+    width: auto;
+    max-width: calc(100% - 88px);
+    justify-content: flex-end;
+    gap: 10px;
+    overflow-x: auto;
+    padding: 3px 1px;
+    scrollbar-width: none;
+  }
+
+  .navLinks::-webkit-scrollbar {
+    display: none;
+  }
+
+  .navLinks a {
+    flex: 0 0 auto;
+    font-size: 0.66rem;
+    line-height: 1;
   }
 
   .hero {
-    width: min(100% - 28px, 420px);
-    padding-top: 130px;
+    width: min(100% - 24px, 420px);
+    min-height: auto;
+    gap: 14px;
+    align-content: start;
+    padding: 84px 0 18px;
+  }
+
+  .heroCopy {
+    display: grid;
+    gap: 14px;
   }
 
   .heroCopy h1 {
-    font-size: 4.35rem;
+    font-size: clamp(3.85rem, 20vw, 4.85rem);
+    line-height: 0.82;
   }
 
   .heroCopy > p:not(.microcopy) {
-    font-size: 1rem;
+    max-width: none;
+    margin: 0;
+    font-size: 0.98rem;
+    line-height: 1.45;
+  }
+
+  .heroActions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+    margin-top: 2px;
   }
 
   .primaryAction,
   .secondaryAction {
-    flex: 1 1 150px;
+    width: 100%;
+    min-height: 46px;
+    border-width: 3px;
+    border-radius: 8px;
+    padding: 0 8px;
+    font-size: 0.9rem;
   }
 
   .toyStage {
-    min-height: 390px;
+    min-height: 0;
+    gap: 18px;
+    padding-top: 4px;
+  }
+
+  .stageGlow {
+    width: min(300px, 88%);
+    opacity: 0.72;
+    filter: blur(8px);
   }
 
   .bmoUnit {
-    width: min(64vw, 210px);
+    width: clamp(188px, 58vw, 224px);
+  }
+
+  .bmoAntenna {
+    top: -8px;
+    width: 36px;
+    height: 22px;
+    border-top-width: 3px;
+    border-left-width: 3px;
+  }
+
+  .bmoAntenna::after {
+    top: -7px;
+    right: -7px;
+    width: 10px;
+    height: 10px;
+    border-width: 2px;
   }
 
   .buttonDeck {
-    bottom: 20px;
-    gap: 6px;
-    flex-wrap: nowrap;
+    display: grid;
+    width: min(100%, 360px);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 5px;
   }
 
   .moodButton {
-    min-width: 62px;
-    min-height: 42px;
-    gap: 4px;
-    padding: 0 6px;
-    font-size: 0.58rem;
+    min-width: 0;
+    min-height: 40px;
+    gap: 3px;
+    border-width: 2px;
+    border-radius: 7px;
+    padding: 0 3px;
+    font-size: 0.52rem;
+    box-shadow:
+      0 4px 0 rgba(16, 37, 31, 0.82),
+      0 10px 22px rgba(16, 37, 31, 0.16);
+  }
+
+  .moodButton:hover,
+  .moodButtonActive {
+    transform: translateY(-2px);
+    box-shadow:
+      0 5px 0 rgba(16, 37, 31, 0.82),
+      0 14px 26px rgba(16, 37, 31, 0.2);
   }
 
   .moodButton > span {
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-width: 2px;
   }
 
   .questStrip {
-    position: static;
-    margin-top: 16px;
+    position: relative;
+    bottom: auto;
+    left: auto;
+    grid-template-columns: auto auto 1fr;
+    align-items: center;
+    column-gap: 10px;
+    margin-top: 0;
+    border-top: 2px solid rgba(16, 37, 31, 0.14);
+    padding-top: 10px;
+  }
+
+  .questStrip span {
+    font-size: 0.64rem;
+  }
+
+  .questStrip strong {
+    font-size: 1rem;
+  }
+
+  .questStrip div {
+    justify-content: flex-end;
+  }
+
+  .questStrip i {
+    width: 8px;
+    height: 8px;
+    border-width: 2px;
   }
 
   .signalSection,
@@ -1348,36 +1534,145 @@
   .detailSection,
   .componentSection,
   .brainSection {
-    width: min(100% - 28px, 420px);
-    padding: 70px 0;
-    scroll-margin-top: 126px;
+    width: min(100% - 24px, 420px);
+    gap: 22px;
+    padding: 58px 0;
+    scroll-margin-top: 86px;
+  }
+
+  .signalCopy {
+    order: -1;
+  }
+
+  .signalArt,
+  .anatomyScene {
+    border-width: 3px;
+    border-radius: 14px;
+    box-shadow: 7px 7px 0 rgba(16, 37, 31, 0.14);
+  }
+
+  .signalArt {
+    min-height: 260px;
   }
 
   .signalCopy h2,
   .insideCopy h2,
   .detailHeader h2,
   .brainSection h2 {
-    font-size: 2.65rem;
+    font-size: clamp(2.15rem, 12vw, 2.8rem);
+    line-height: 0.94;
+  }
+
+  .signalCopy > p:not(.microcopy),
+  .insideCopy p,
+  .detailHeader p:not(.microcopy),
+  .brainSection p {
+    margin-top: 16px;
+    font-size: 0.98rem;
+    line-height: 1.56;
   }
 
   .featureGrid {
     grid-template-columns: 1fr;
+    gap: 12px;
   }
 
   .brainGrid {
     grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .featureCard,
+  .componentRow,
+  .brainCard {
+    border-width: 2px;
+    border-radius: 10px;
+    box-shadow: 5px 5px 0 rgba(16, 37, 31, 0.14);
   }
 
   .featureCard {
     min-height: 0;
+    padding: 16px;
+  }
+
+  .componentRow {
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .componentSpecs div {
+    border-left-width: 2px;
+  }
+
+  .signalList {
+    gap: 8px;
+    margin-top: 22px;
   }
 
   .signalRow {
     grid-template-columns: 36px minmax(0, 1fr);
+    gap: 8px 10px;
+    border-top-width: 2px;
+    padding: 12px 0;
   }
 
   .signalRow small {
     grid-column: 2;
+    font-size: 0.76rem;
+    line-height: 1.25;
+  }
+
+  .organCallout {
+    border-radius: 8px;
+    padding: 8px;
+  }
+
+  .repoPanel a {
+    min-height: 48px;
+    border-width: 2px;
+    border-radius: 8px;
+    box-shadow: 0 5px 0 rgba(16, 37, 31, 0.18);
+  }
+}
+
+@media (max-width: 360px) {
+  .brand > span:not(.brandFace) {
+    display: none;
+  }
+
+  .navLinks {
+    max-width: calc(100% - 44px);
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .navLinks a {
+    font-size: 0.62rem;
+  }
+
+  .heroCopy h1 {
+    font-size: 3.72rem;
+  }
+
+  .heroCopy > p:not(.microcopy) {
+    font-size: 0.92rem;
+  }
+
+  .primaryAction,
+  .secondaryAction {
+    min-height: 44px;
+    font-size: 0.82rem;
+  }
+
+  .moodButton {
+    gap: 2px;
+    padding: 0 2px;
+    font-size: 0.48rem;
+  }
+
+  .moodButton > span {
+    width: 6px;
+    height: 6px;
   }
 }
 
