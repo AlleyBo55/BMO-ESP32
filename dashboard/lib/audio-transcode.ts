@@ -1,8 +1,19 @@
 import 'server-only';
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createRequire } from 'node:module';
 
-import ffmpegPath from 'ffmpeg-static';
+// ffmpeg-static is an OPTIONAL dependency: its postinstall downloads a platform
+// binary from GitHub Releases, which can fail in CI/Vercel (e.g. a 504). Resolve
+// it defensively at runtime so the build never breaks and the rest of the app
+// keeps working; only the song/voice transcode path errors out cleanly when the
+// binary is unavailable (see ffmpegBinary()).
+let ffmpegPath: string | null = null;
+try {
+  ffmpegPath = createRequire(import.meta.url)('ffmpeg-static') as string | null;
+} catch {
+  ffmpegPath = null;
+}
 
 /**
  * Streaming audio transcoder.
