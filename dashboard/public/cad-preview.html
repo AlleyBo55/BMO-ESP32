@@ -184,6 +184,13 @@
     const key = new THREE.DirectionalLight(0xffffff, 1.25); key.position.set(120, 180, 160); scene.add(key);
     const rim = new THREE.DirectionalLight(0xbfeede, 0.55); rim.position.set(-140, 60, -120); scene.add(rim);
 
+    // Tiny always-present reference so a blank screen can be diagnosed: if you
+    // see the axes but no model, it's a model/transform issue; if you see
+    // nothing at all, it's WebGL/canvas/URL. Hidden unless ?debug=1.
+    const debugMode = q.get("debug") === "1";
+    if (debugMode) scene.add(new THREE.AxesHelper(60));
+    window.__cadDebug = {};
+
     const controls = new OrbitControls(camera, canvas);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
@@ -220,8 +227,12 @@
       if (group) { scene.remove(group); group = null; }
       const g = new THREE.Group();
       try {
-        for (const [file, color, pos, rot] of def.parts) {
-          const part = await loadGlb(file);
+        // Load every part in PARALLEL (was sequential = slow for the 18-part kits).
+        const parts = await Promise.all(
+          def.parts.map(async (spec) => ({ spec, part: await loadGlb(spec[0]) })),
+        );
+        for (const { spec, part } of parts) {
+          const [, color, pos, rot] = spec;
           const m = mat[color] || mat.body;
           part.traverse((n) => { if (n.isMesh) n.material = m; });
           applyTransform(part, pos, rot, def.flat);
@@ -242,6 +253,19 @@
       const box = new THREE.Box3().setFromObject(g);
       box.getCenter(modelCenter);
       modelRadius = box.getBoundingSphere(new THREE.Sphere()).radius || 100;
+      window.__cadDebug = {
+        model: name, parts: g.children.length,
+        radius: Math.round(modelRadius),
+        center: [modelCenter.x, modelCenter.y, modelCenter.z].map((v) => Math.round(v)),
+        size: [box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z].map((v) => Math.round(v)),
+      };
+      if (!Number.isFinite(modelRadius) || modelRadius <= 0 || g.children.length === 0) {
+        hint.style.display = "block";
+        hint.textContent = "Model loaded but empty/invalid — check console.";
+        console.error("cad-preview empty model", window.__cadDebug);
+        return;
+      }
+      console.log("cad-preview loaded", window.__cadDebug);
       hint.style.display = "none";
       setView(def.home);
     }
