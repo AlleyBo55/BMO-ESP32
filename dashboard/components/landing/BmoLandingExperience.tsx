@@ -84,6 +84,7 @@ export default function BmoLandingExperience(): ReactElement {
           <a href="#features">Features</a>
           <a href="#brain">Brain</a>
           <a href="#inside">Inside</a>
+          <a href="#cad">3D</a>
           <Link href="/wiki">Wiki</Link>
         </nav>
       </header>
@@ -97,9 +98,12 @@ export default function BmoLandingExperience(): ReactElement {
           </p>
 
           <div className={styles.heroActions}>
+            <a href="#cad" className={styles.primaryAction}>
+              Make your own BMO
+            </a>
             <button
               type="button"
-              className={styles.primaryAction}
+              className={styles.secondaryAction}
               onClick={() => activateMood(getNextMood(activeMood))}
             >
               Press a mood
@@ -113,6 +117,11 @@ export default function BmoLandingExperience(): ReactElement {
               View repo
             </a>
           </div>
+          <a href="#cad" className={styles.heroBadge}>
+            <span className={styles.heroBadgeDot} aria-hidden="true" />
+            Spin it in 3D &amp; print it yourself on a Bambu Lab A1
+            <span aria-hidden="true">→</span>
+          </a>
         </div>
 
         <div className={styles.toyStage}>
@@ -266,6 +275,79 @@ export default function BmoLandingExperience(): ReactElement {
               <small>{item.purpose}</small>
             </span>
           ))}
+        </div>
+      </section>
+
+      <section id="cad" className={styles.cadSection}>
+        <div className={styles.detailHeader}>
+          <p className={styles.microcopy}>3D preview · Bambu Lab A1</p>
+          <h2>See it in 3D. Then print your own.</h2>
+          <p>
+            This is the real, printable BMO — straight from the build files.
+            Switch between the assembled body and the two A1 print plates, then
+            orbit with the Front / Back / Left / Right / Top / Bottom buttons.
+            Everything is sized for a Bambu Lab A1 (256 × 256 mm bed).
+          </p>
+        </div>
+
+        <div className={styles.cadFrameWrap}>
+          <iframe
+            src="/cad-preview.html?model=compact&cb=28"
+            className={styles.cadFrame}
+            title="BMO 3D CAD preview"
+            loading="lazy"
+          />
+        </div>
+
+        <div className={styles.cadHow}>
+          <ol className={styles.cadSteps}>
+            <li>
+              <b>Explore</b>
+              <span>
+                Spin the model above. Tap a part to learn its job. Pick the
+                Outside or Inside kit to see how it all packs in.
+              </span>
+            </li>
+            <li>
+              <b>Download</b>
+              <span>
+                Grab the A1-ready plates below (.3mf), already laid out flat with
+                zero overlap. STL is in the repo if you prefer.
+              </span>
+            </li>
+            <li>
+              <b>Print on your A1</b>
+              <span>
+                Open the .3mf in Bambu Studio, pick PLA, slice, and send to your
+                Bambu Lab A1. ~2 plates, no supports for the body.
+              </span>
+            </li>
+          </ol>
+
+          <div className={styles.cadDownloads}>
+            <a
+              className={styles.cadDownload}
+              href="/exports/bmo_compact_outside_kit.3mf"
+              download
+            >
+              ⬇ Outside kit · A1 .3mf
+            </a>
+            <a
+              className={styles.cadDownload}
+              href="/exports/bmo_compact_inside_kit.3mf"
+              download
+            >
+              ⬇ Inside kit · A1 .3mf
+            </a>
+            <a
+              className={styles.cadDownloadGhost}
+              href={PROJECT_REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              STL / STEP &amp; build files →
+            </a>
+          </div>
         </div>
       </section>
 

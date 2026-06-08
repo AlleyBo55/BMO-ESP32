@@ -223,6 +223,43 @@
   transform: translateY(-3px);
 }
 
+.heroBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 18px;
+  padding: 9px 16px;
+  width: fit-content;
+  border: 3px solid #10251f;
+  border-radius: 999px;
+  background: #ffe36d;
+  box-shadow: 0 5px 0 #ff8e7f;
+  color: #10251f;
+  font-weight: 950;
+  font-size: 0.86rem;
+  text-decoration: none;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.heroBadge:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 7px 0 #ff8e7f;
+}
+
+.heroBadgeDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #19a78f;
+  box-shadow: 0 0 0 4px rgba(25, 167, 143, 0.28);
+  animation: heroBadgePulse 1.8s ease-in-out infinite;
+}
+
+@keyframes heroBadgePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
 .brand:focus-visible,
 .navLinks a:focus-visible,
 .primaryAction:focus-visible,
@@ -1685,5 +1722,167 @@
   .mouth {
     animation: none;
     transition: none;
+  }
+}
+
+/* ---------- 3D CAD live preview (landing section) ---------- */
+.cadSection {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(1180px, calc(100% - 36px));
+  margin: 0 auto;
+  scroll-margin-top: 96px;
+  padding: 86px 0;
+  gap: 24px;
+}
+
+.cadToggle {
+  display: inline-flex;
+  gap: 6px;
+  width: fit-content;
+  padding: 5px;
+  border: 3px solid #10251f;
+  border-radius: 999px;
+  background: #fffdf0;
+  box-shadow: 6px 6px 0 rgba(16, 37, 31, 0.14);
+}
+
+.cadTab {
+  border: 0;
+  border-radius: 999px;
+  padding: 9px 24px;
+  background: transparent;
+  color: #10251f;
+  font: inherit;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.cadTabActive {
+  background: #10251f;
+  color: #f5ffec;
+}
+
+.cadFrameWrap {
+  position: relative;
+  height: clamp(380px, 56vw, 620px);
+  overflow: hidden;
+  border: 4px solid #10251f;
+  border-radius: 18px;
+  background: #0c1414;
+  box-shadow: 14px 14px 0 rgba(16, 37, 31, 0.14);
+}
+
+.cadFrame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.cadHow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: clamp(20px, 4vw, 44px);
+  align-items: center;
+  margin-top: 26px;
+}
+
+.cadSteps {
+  list-style: none;
+  counter-reset: cadstep;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.cadSteps li {
+  counter-increment: cadstep;
+  position: relative;
+  padding-left: 46px;
+}
+
+.cadSteps li::before {
+  content: counter(cadstep);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 3px solid #10251f;
+  border-radius: 999px;
+  background: #ffe36d;
+  font-weight: 1000;
+}
+
+.cadSteps b {
+  display: block;
+  font-weight: 1000;
+  color: #10251f;
+}
+
+.cadSteps span {
+  color: rgba(17, 37, 31, 0.74);
+  font-weight: 650;
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.cadDownloads {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cadDownload,
+.cadDownloadGhost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  border: 3px solid #10251f;
+  border-radius: 11px;
+  padding: 0 18px;
+  font-weight: 950;
+  text-decoration: none;
+  color: #10251f;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.cadDownload {
+  background: #b6f5c9;
+  box-shadow: 0 6px 0 rgba(16, 37, 31, 0.2);
+}
+
+.cadDownloadGhost {
+  background: transparent;
+  border-style: dashed;
+  min-height: 44px;
+  font-size: 0.9rem;
+}
+
+.cadDownload:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 9px 0 rgba(16, 37, 31, 0.2);
+}
+
+@media (max-width: 760px) {
+  .cadSection {
+    width: min(100% - 24px, 420px);
+    padding: 58px 0;
+  }
+
+  .cadFrameWrap {
+    height: 72vh;
+    min-height: 440px;
+  }
+
+  .cadHow {
+    grid-template-columns: 1fr;
   }
 }

@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>BMO 3D preview</title>
+  <style>
+    :root {
+      --ink: #10251f;
+      --paper: #f5ffec;
+      --teal: #22c5bd;
+      --bg-a: #0c1414;
+      --bg-b: #11201d;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; height: 100%; overflow: hidden;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(circle at 50% 35%, var(--bg-b), var(--bg-a) 78%);
+      color: var(--paper); touch-action: none;
+    }
+    #stage { position: fixed; inset: 0; }
+    canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+    /* All controls live in one bottom panel so they never collide with the
+       page's sticky header and never wrap into giant circular blobs. */
+    #controls {
+      position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%);
+      z-index: 5; display: flex; flex-direction: column; gap: 8px;
+      width: calc(100% - 16px); max-width: 540px; align-items: stretch;
+    }
+    .seg {
+      display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
+      padding: 6px; border-radius: 14px;
+      background: rgba(8, 16, 15, 0.66); backdrop-filter: blur(10px);
+      border: 1px solid rgba(189, 245, 214, 0.18);
+    }
+    .seg button {
+      appearance: none; border: 0; cursor: pointer;
+      font: inherit; font-weight: 800; letter-spacing: 0.01em;
+      color: var(--paper); background: rgba(255, 255, 255, 0.04);
+      border-radius: 9px; padding: 11px 10px; min-height: 46px;
+      transition: background 0.15s, color 0.15s; white-space: nowrap;
+    }
+    .seg button:hover { background: rgba(189, 245, 214, 0.14); }
+    .seg button.active { background: var(--teal); color: var(--ink); }
+    /* Model tabs: 3 equal segments in one row. */
+    #models button { flex: 1 1 0; }
+    /* View buttons: fill the row, wrapping to tidy rows (4 + 3). */
+    #views button { flex: 1 1 22%; }
+    #spinBtn { background: rgba(189, 245, 214, 0.12); }
+
+    #hint {
+      position: fixed; top: 44%; left: 50%; transform: translate(-50%, -50%);
+      font-weight: 800; opacity: 0.7; letter-spacing: 0.04em; z-index: 1;
+      pointer-events: none; text-align: center;
+    }
+    #tag {
+      position: fixed; left: 50%; transform: translateX(-50%); top: 12px;
+      z-index: 4; font-size: 0.75rem; font-weight: 700; opacity: 0.6;
+      text-align: center; pointer-events: none;
+    }
+    @media (max-width: 560px) {
+      .seg button { padding: 10px 8px; font-size: 0.82rem; min-height: 44px; }
+      #tag { display: none; }
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="stage"><canvas id="c"></canvas></div>
+
+  <div id="tag">Drag to rotate • pinch to zoom</div>
+
+  <div id="controls">
+    <div id="models" class="seg" role="tablist" aria-label="Model">
+      <button data-model="compact" class="active" type="button">Compact</button>
+      <button data-model="outside" type="button">Outside</button>
+      <button data-model="inside" type="button">Inside</button>
+    </div>
+    <div id="views" class="seg" aria-label="Camera views">
+      <button data-view="front" type="button">Front</button>
+      <button data-view="back" type="button">Back</button>
+      <button data-view="left" type="button">Left</button>
+      <button data-view="right" type="button">Right</button>
+      <button data-view="top" type="button">Top</button>
+      <button data-view="bottom" type="button">Bottom</button>
+      <button data-view="spin" id="spinBtn" type="button">Spin</button>
+    </div>
+  </div>
+
+  <div id="hint">Loading…</div>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+    const q = new URLSearchParams(location.search);
+    const CB = q.get("cb") || "1";
+    const EX = "./exports/";
+    const url = (f) => `${EX}${f}.glb?v=${CB}`;
+
+    // ---- Palette (matches the CAD viewer) ----
+    const C = {
+      body: 0x22c5bd, bodyDark: 0x18a6aa, screen: 0x123838, face: 0xbdf5d6,
+      dpad: 0xd7dd54, slot: 0x2a6fc5, red: 0xe84c4d, blue: 0x39a8e6,
+      green: 0x4fc66a, dark: 0x173b3c, linkage: 0xb9cad2, mechaBay: 0x5fc28a,
+    };
+    const mat = {};
+    for (const [k, c] of Object.entries(C)) {
+      mat[k] = new THREE.MeshStandardMaterial({
+        color: c, metalness: 0.03, roughness: 0.52, side: THREE.DoubleSide,
+      });
+    }
+
+    // ---- Model definitions ----
+    // Compact BMO = full assembled look (Y up). Kits = pre-placed flat plates,
+    // rotated so the bed lies flat and "Top" looks straight down at the layout.
+    const MODELS = {
+      compact: {
+        flat: false, home: "front",
+        parts: [
+          ["bmo_compact_front_shell_preview", "body", [0, 0, 0]],
+          ["bmo_compact_bezel", "body", [0, 24, -1.2]],
+          ["bmo_compact_screen_dark", "screen", [0, 24, 0.6]],
+          ["bmo_compact_dpad", "dpad", [-22, -33, -1]],
+          ["bmo_compact_triangle", "blue", [8, -33, -1]],
+          ["bmo_compact_green", "green", [24, -32, -1]],
+          ["bmo_compact_red", "red", [13, -45, -1]],
+          ["bmo_compact_power_dot", "slot", [22, -8, -1]],
+          ["bmo_compact_pill", "slot", [-28, -48, -1]],
+          ["bmo_compact_pill", "slot", [-19, -48, -1]],
+          ["bmo_compact_side_text", "dark", [44.5, 0, 27], [0, 90, 0]],
+          ["bmo_compact_left_arm", "blue", [-44, 4, 27]],
+          ["bmo_compact_right_arm", "blue", [44, 4, 27]],
+          ["bmo_compact_left_leg", "blue", [-15, -56, 27]],
+          ["bmo_compact_right_leg", "blue", [15, -56, 27]],
+          ["bmo_compact_rear_lid", "bodyDark", [0, 0, 51]],
+          ["bmo_compact_cam_lock", "linkage", [-33, -45, 54]],
+          ["bmo_compact_cam_lock", "linkage", [33, -45, 54]],
+        ],
+      },
+      outside: {
+        flat: true, home: "top",
+        parts: [
+          ["bmo_okit_front_shell", "body"], ["bmo_okit_rear_lid", "bodyDark"],
+          ["bmo_okit_cam_lock_a", "linkage"], ["bmo_okit_cam_lock_b", "linkage"],
+          ["bmo_okit_left_arm", "blue"], ["bmo_okit_right_arm", "blue"],
+          ["bmo_okit_left_leg", "blue"], ["bmo_okit_right_leg", "blue"],
+          ["bmo_okit_bezel", "body"], ["bmo_okit_face_panel", "face"],
+          ["bmo_okit_dpad", "dpad"], ["bmo_okit_red", "red"],
+          ["bmo_okit_triangle", "blue"], ["bmo_okit_side_text", "dark"],
+          ["bmo_okit_green", "green"], ["bmo_okit_power_dot", "slot"],
+          ["bmo_okit_pill_left", "slot"], ["bmo_okit_pill_right", "slot"],
+        ],
+      },
+      inside: {
+        flat: true, home: "top",
+        parts: [
+          ["bmo_ikit_rack", "mechaBay"],
+          ["bmo_ikit_speaker_strap", "linkage"],
+          ["bmo_ikit_battery_strap", "linkage"],
+        ],
+      },
+    };
+
+    // ---- Scene ----
+    const canvas = document.getElementById("c");
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 5000);
+    camera.position.set(0, 0, 300);
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x33454a, 1.05));
+    const key = new THREE.DirectionalLight(0xffffff, 1.25); key.position.set(120, 180, 160); scene.add(key);
+    const rim = new THREE.DirectionalLight(0xbfeede, 0.55); rim.position.set(-140, 60, -120); scene.add(rim);
+
+    const controls = new OrbitControls(camera, canvas);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.rotateSpeed = 0.9;
+    controls.zoomSpeed = 0.9;
+    controls.panSpeed = 0.8;
+    controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+    controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+
+    const loader = new GLTFLoader();
+    const cache = new Map();
+    let group = null;
+    let modelRadius = 100;
+    const modelCenter = new THREE.Vector3();
+    let autoSpin = false;
+
+    function loadGlb(file) {
+      if (cache.has(file)) return Promise.resolve(cache.get(file).clone(true));
+      return new Promise((res, rej) => {
+        loader.load(
+          url(file),
+          (g) => { cache.set(file, g.scene); res(g.scene.clone(true)); },
+          undefined,
+          (err) => rej(new Error(`${file}: ${err && err.message ? err.message : err}`)),
+        );
+      });
+    }
+
+    async function showModel(name) {
+      const def = MODELS[name];
+      const hint = document.getElementById("hint");
+      hint.style.display = "block";
+      hint.textContent = "Loading…";
+      if (group) { scene.remove(group); group = null; }
+      const g = new THREE.Group();
+      try {
+        for (const [file, color, pos, rot] of def.parts) {
+          const part = await loadGlb(file);
+          const m = mat[color] || mat.body;
+          part.traverse((n) => { if (n.isMesh) n.material = m; });
+          applyTransform(part, pos, rot, def.flat);
+          g.add(part);
+        }
+      } catch (e) {
+        hint.textContent = "Could not load: " + (e && e.message ? e.message : e);
+        console.error(e);
+        return;
+      }
+      // Make every model Y-up so OrbitControls (Y-up) stays stable. The kits are
+      // already Y-up from the plate transform; the assembled compact stands up
+      // +Z, so tip it -90 deg about X to bring it upright in world Y.
+      if (!def.flat) g.rotation.x = -Math.PI / 2;
+      scene.add(g);
+      group = g;
+      g.updateWorldMatrix(true, true);
+      const box = new THREE.Box3().setFromObject(g);
+      box.getCenter(modelCenter);
+      modelRadius = box.getBoundingSphere(new THREE.Sphere()).radius || 100;
+      hint.style.display = "none";
+      setView(def.home);
+    }
+
+    // build123d glTF export is in METRES with CAD +Y mapped to glTF -Z. Match the
+    // main CAD viewer: scale to mm and remap axes so the part sits correctly.
+    //   assembled (compact): scale (1000,1000,-1000), position (x, z, y)
+    //   flat plate (kits):   scale  1000,             position (x, z, -y)
+    function applyTransform(root, pos, rot, flat) {
+      const [x, y, z] = pos || [0, 0, 0];
+      const [rx, ry, rz] = rot || [0, 0, 0];
+      if (flat) { root.scale.setScalar(1000); root.position.set(x, z, -y); }
+      else { root.scale.set(1000, 1000, -1000); root.position.set(x, z, y); }
+      root.rotation.set(rx * Math.PI / 180, ry * Math.PI / 180, rz * Math.PI / 180);
+    }
+
+    // Six orthographic poses, all Y-up (face is toward +Z after the upright fix).
+    const VIEWS = {
+      front:  { dir: [0, 0, 1],  up: [0, 1, 0] },
+      back:   { dir: [0, 0, -1], up: [0, 1, 0] },
+      left:   { dir: [-1, 0, 0], up: [0, 1, 0] },
+      right:  { dir: [1, 0, 0],  up: [0, 1, 0] },
+      top:    { dir: [0, 1, 0],  up: [0, 0, -1] },
+      bottom: { dir: [0, -1, 0], up: [0, 0, 1] },
+    };
+
+    function setView(view) {
+      if (view === "spin") { toggleSpin(); return; }
+      document.querySelectorAll("#views button[data-view]").forEach((b) =>
+        b.classList.toggle("active", b.dataset.view === view));
+      const preset = VIEWS[view] || VIEWS.front;
+      const d = modelRadius / Math.sin((camera.fov * Math.PI / 180) / 2) * 1.35;
+      const [vx, vy, vz] = preset.dir;
+      const up = new THREE.Vector3(preset.up[0], preset.up[1], preset.up[2]);
+      camera.up.copy(up);
+      // Bias the look-point down along "up" so the model floats above the
+      // bottom control panel instead of sitting behind it.
+      const target = modelCenter.clone().addScaledVector(up, -modelRadius * 0.16);
+      camera.position.set(
+        target.x + vx * d, target.y + vy * d, target.z + vz * d);
+      camera.near = Math.max(d / 120, 0.1);
+      camera.far = d * 12;
+      camera.updateProjectionMatrix();
+      controls.target.copy(target);
+      camera.lookAt(target);
+      controls.update();
+    }
+
+    function toggleSpin() {
+      autoSpin = !autoSpin;
+      controls.autoRotate = autoSpin;
+      controls.autoRotateSpeed = 1.4;
+      document.getElementById("spinBtn").classList.toggle("active", autoSpin);
+    }
+
+    function resize() {
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      if (canvas.width !== w || canvas.height !== h) {
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+      }
+    }
+    function tick() {
+      resize();
+      controls.update();
+      renderer.render(scene, camera);
+      requestAnimationFrame(tick);
+    }
+
+    document.querySelectorAll("#models button").forEach((b) => {
+      b.addEventListener("click", () => {
+        document.querySelectorAll("#models button").forEach((x) => x.classList.remove("active"));
+        b.classList.add("active");
+        showModel(b.dataset.model);
+      });
+    });
+    document.querySelectorAll("#views button").forEach((b) => {
+      b.addEventListener("click", () => setView(b.dataset.view));
+    });
+
+    const startModel = q.get("model") && MODELS[q.get("model")] ? q.get("model") : "compact";
+    document.querySelectorAll("#models button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.model === startModel);
+    });
+    showModel(startModel);
+    tick();
+  </script>
+</body>
+</html>
