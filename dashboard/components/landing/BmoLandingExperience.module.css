@@ -841,9 +841,27 @@
   content: "";
 }
 
+.demoSection {
+  position: relative;
+  display: grid;
+  gap: clamp(20px, 4vw, 36px);
+  width: min(1180px, calc(100% - 36px));
+  margin: 0 auto;
+  padding: clamp(36px, 6vw, 88px) 0;
+  scroll-margin-top: 96px;
+  justify-items: center;
+  text-align: center;
+}
+
+.demoEmbed {
+  display: flex;
+  justify-content: center;
+  width: min(550px, 100%);
+}
+
 .bmoBody {
   position: relative;
-  aspect-ratio: 0.78;
+  aspect-ratio: 0.83;
   border: 4px solid var(--body-edge);
   border-radius: 28px;
   background:

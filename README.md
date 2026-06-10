@@ -11,6 +11,8 @@
 [![AI Live](https://img.shields.io/badge/AI-live-7AE582?style=for-the-badge)](#-ai-features--live-now)
 [![Made with ♥](https://img.shields.io/badge/made%20with-♥-FFE066?style=for-the-badge)](#)
 
+[![▶ Watch the demo on X](https://img.shields.io/badge/▶%20Watch%20the%20demo-on%20X-1D9BF0?style=for-the-badge&logo=x&logoColor=white)](https://x.com/AlleyBo55/status/2061169600885395661)
+
 > ## ⭐ **Star it. Fork it. Build it.** ⭐
 
 *"Hi friend!"*
