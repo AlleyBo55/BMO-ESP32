@@ -129,30 +129,34 @@
         flat: false, home: "front",
         parts: [
           ["bmo_compact_front_shell_preview", "body", [0, 0, 0]],
-          ["bmo_compact_bezel", "body", [0, 24, -1.2]],
-          ["bmo_compact_screen_dark", "screen", [0, 24, 0.6]],
-          ["bmo_compact_dpad", "dpad", [-22, -33, -1]],
-          ["bmo_compact_triangle", "blue", [8, -33, -1]],
-          ["bmo_compact_green", "green", [24, -32, -1]],
-          ["bmo_compact_red", "red", [13, -45, -1]],
-          ["bmo_compact_power_dot", "slot", [22, -8, -1]],
-          ["bmo_compact_pill", "slot", [-28, -48, -1]],
-          ["bmo_compact_pill", "slot", [-19, -48, -1]],
-          ["bmo_compact_side_text", "dark", [44.5, 0, 27], [0, 90, 0]],
-          ["bmo_compact_left_arm", "blue", [-44, 4, 27]],
-          ["bmo_compact_right_arm", "blue", [44, 4, 27]],
-          ["bmo_compact_left_leg", "blue", [-15, -56, 27]],
-          ["bmo_compact_right_leg", "blue", [15, -56, 27]],
-          ["bmo_compact_rear_lid", "bodyDark", [0, 0, 51]],
-          ["bmo_compact_cam_lock", "linkage", [-33, -45, 54]],
-          ["bmo_compact_cam_lock", "linkage", [33, -45, 54]],
+          ["bmo_compact_face_panel", "face", [0, 21, -0.4]],
+          ["bmo_compact_bezel", "body", [0, 21, -1.2]],
+          ["bmo_compact_screen_dark", "screen", [0, 21, 0.8]],
+          ["bmo_compact_dpad", "dpad", [-20, -24, -1]],
+          ["bmo_compact_triangle", "blue", [5, -25, -1]],
+          ["bmo_compact_green", "green", [21, -24, -1]],
+          ["bmo_compact_red", "red", [11, -37, -1]],
+          ["bmo_compact_power_dot", "slot", [20, -12, -1]],
+          ["bmo_compact_pill", "slot", [-24, -40, -1]],
+          ["bmo_compact_pill", "slot", [-15, -40, -1]],
+          ["bmo_compact_side_text", "dark", [40.5, 0, 26], [0, 90, 0]],
+          ["bmo_compact_left_arm", "blue", [-40, 8, 26]],
+          ["bmo_compact_right_arm", "blue", [40, 8, 26]],
+          ["bmo_compact_left_leg", "blue", [-16, -48, 26]],
+          ["bmo_compact_right_leg", "blue", [16, -48, 26]],
+          ["bmo_compact_rear_lid", "bodyDark", [0, 0, 49]],
+          ["bmo_compact_cam_lock", "linkage", [-24, -35, 52]],
+          ["bmo_compact_cam_lock", "linkage", [24, -35, 52]],
+          ["bmo_compact_cam_lock", "linkage", [-24, 35, 52]],
+          ["bmo_compact_cam_lock", "linkage", [24, 35, 52]],
         ],
       },
       outside: {
         flat: true, home: "top",
         parts: [
           ["bmo_okit_front_shell", "body"], ["bmo_okit_rear_lid", "bodyDark"],
-          ["bmo_okit_cam_lock_a", "linkage"], ["bmo_okit_cam_lock_b", "linkage"],
+          ["bmo_okit_cam_lock_1", "linkage"], ["bmo_okit_cam_lock_2", "linkage"],
+          ["bmo_okit_cam_lock_3", "linkage"], ["bmo_okit_cam_lock_4", "linkage"],
           ["bmo_okit_left_arm", "blue"], ["bmo_okit_right_arm", "blue"],
           ["bmo_okit_left_leg", "blue"], ["bmo_okit_right_leg", "blue"],
           ["bmo_okit_bezel", "body"], ["bmo_okit_face_panel", "face"],
@@ -183,6 +187,13 @@
     scene.add(new THREE.HemisphereLight(0xffffff, 0x33454a, 1.05));
     const key = new THREE.DirectionalLight(0xffffff, 1.25); key.position.set(120, 180, 160); scene.add(key);
     const rim = new THREE.DirectionalLight(0xbfeede, 0.55); rim.position.set(-140, 60, -120); scene.add(rim);
+
+    // Tiny always-present reference so a blank screen can be diagnosed: if you
+    // see the axes but no model, it's a model/transform issue; if you see
+    // nothing at all, it's WebGL/canvas/URL. Hidden unless ?debug=1.
+    const debugMode = q.get("debug") === "1";
+    if (debugMode) scene.add(new THREE.AxesHelper(60));
+    window.__cadDebug = {};
 
     const controls = new OrbitControls(camera, canvas);
     controls.enableDamping = true;
@@ -220,8 +231,12 @@
       if (group) { scene.remove(group); group = null; }
       const g = new THREE.Group();
       try {
-        for (const [file, color, pos, rot] of def.parts) {
-          const part = await loadGlb(file);
+        // Load every part in PARALLEL (was sequential = slow for the 18-part kits).
+        const parts = await Promise.all(
+          def.parts.map(async (spec) => ({ spec, part: await loadGlb(spec[0]) })),
+        );
+        for (const { spec, part } of parts) {
+          const [, color, pos, rot] = spec;
           const m = mat[color] || mat.body;
           part.traverse((n) => { if (n.isMesh) n.material = m; });
           applyTransform(part, pos, rot, def.flat);
@@ -242,6 +257,19 @@
       const box = new THREE.Box3().setFromObject(g);
       box.getCenter(modelCenter);
       modelRadius = box.getBoundingSphere(new THREE.Sphere()).radius || 100;
+      window.__cadDebug = {
+        model: name, parts: g.children.length,
+        radius: Math.round(modelRadius),
+        center: [modelCenter.x, modelCenter.y, modelCenter.z].map((v) => Math.round(v)),
+        size: [box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z].map((v) => Math.round(v)),
+      };
+      if (!Number.isFinite(modelRadius) || modelRadius <= 0 || g.children.length === 0) {
+        hint.style.display = "block";
+        hint.textContent = "Model loaded but empty/invalid — check console.";
+        console.error("cad-preview empty model", window.__cadDebug);
+        return;
+      }
+      console.log("cad-preview loaded", window.__cadDebug);
       hint.style.display = "none";
       setView(def.home);
     }

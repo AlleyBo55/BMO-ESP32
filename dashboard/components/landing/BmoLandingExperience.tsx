@@ -4,6 +4,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import type { CSSProperties, ReactElement } from 'react';
+import { Tweet } from 'react-tweet';
 
 import {
   BRAIN_CAPABILITIES,
@@ -81,6 +82,7 @@ export default function BmoLandingExperience(): ReactElement {
 
         <nav className={styles.navLinks} aria-label="Landing navigation">
           <a href="#world">Signals</a>
+          <a href="#demo">Demo</a>
           <a href="#features">Features</a>
           <a href="#brain">Brain</a>
           <a href="#inside">Inside</a>
@@ -166,6 +168,21 @@ export default function BmoLandingExperience(): ReactElement {
               />
             ))}
           </div>
+        </div>
+      </section>
+
+      <section id="demo" className={styles.demoSection}>
+        <div className={styles.detailHeader}>
+          <p className={styles.microcopy}>See it in action</p>
+          <h2>BMO, listening and talking back.</h2>
+          <p>
+            A quick clip of the push-to-talk loop: hold the touch sensor, speak,
+            release — and BMO answers out loud with a live lip-sync face.
+          </p>
+        </div>
+
+        <div className={styles.demoEmbed} data-theme="light">
+          <Tweet id="2061169600885395661" />
         </div>
       </section>
 
@@ -292,7 +309,7 @@ export default function BmoLandingExperience(): ReactElement {
 
         <div className={styles.cadFrameWrap}>
           <iframe
-            src="/cad-preview.html?model=compact&cb=28"
+            src="/cad-preview.html?model=compact&cb=37"
             className={styles.cadFrame}
             title="BMO 3D CAD preview"
             loading="lazy"
