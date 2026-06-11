@@ -15,8 +15,8 @@ const outExports = join(here, '..', 'public', 'exports');
 // + the two downloadable A1 print kits (.3mf). Nothing heavier (the combined
 // kit/assembly GLBs and STL/STEP are intentionally excluded).
 const KEEP = [
-  /^bmo_compact_(front_shell_preview|face_panel|bezel|screen_dark|dpad|triangle|green|red|power_dot|pill|side_text|left_arm|right_arm|left_leg|right_leg|rear_lid|cam_lock)\.glb$/,
-  /^bmo_okit_.*\.glb$/,
+  /^bmo_compact_(front_shell_preview|face_panel|bezel|screen_dark|dpad|triangle|green|red|power_dot|pill|side_text|left_arm|right_arm|left_leg|right_leg|rear_lid)\.glb$/,
+  /^bmo_okit_(?!cam_lock).*\.glb$/,
   /^bmo_ikit_.*\.glb$/,
   /^bmo_compact_(outside|inside)_kit\.3mf$/,
 ];
