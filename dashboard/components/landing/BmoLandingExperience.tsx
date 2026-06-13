@@ -309,7 +309,7 @@ export default function BmoLandingExperience(): ReactElement {
 
         <div className={styles.cadFrameWrap}>
           <iframe
-            src="/cad-preview.html?model=compact&cb=41"
+            src="/cad-preview.html?model=compact&cb=42"
             className={styles.cadFrame}
             title="BMO 3D CAD preview"
             loading="lazy"
