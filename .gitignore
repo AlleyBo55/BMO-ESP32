@@ -34,5 +34,12 @@ firmware/bmo_face_anim/audio/*.ogg
 firmware/bmo_face_anim/audio/*.flac
 !firmware/bmo_face_anim/audio/.gitkeep
 
+# Generated CAD output (large binaries; curated GLBs live in dashboard/public/exports)
+hardware/exports/
+
+# Generated audio test artifacts
+dashboard/scripts/reply.wav
+dashboard/scripts/e2e-out/
+
 # Logs
 *.log
