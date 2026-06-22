@@ -5,9 +5,9 @@ import { Buffer } from 'node:buffer';
 import { verifyFingerprint } from '@/app/api/_lib/fingerprint-guard';
 import { writeActivityLog, type ActivityLogRow } from '@/app/api/_lib/log';
 import { getConfig } from '@/lib/config';
-import { OpenRouterError, synthesizeSpeech } from '@/lib/openrouter';
+import { OpenRouterError, synthesizeStream } from '@/lib/openrouter';
 import { generateThought } from '@/lib/thoughts';
-import { BMO_SPEECH_INSTRUCTIONS, BMO_SPEECH_MODEL, toSpeakableText } from '@/lib/voice';
+import { BMO_VOICE_DIRECTION, toSpeakableText } from '@/lib/voice';
 import { applyRadioFx } from '@/lib/voice-fx';
 import { buildWavHeader } from '@/lib/wav';
 
@@ -137,11 +137,12 @@ async function handle(req: Request): Promise<Response> {
   let iterator: AsyncIterator<Buffer>;
   try {
     const it = applyRadioFx(
-      synthesizeSpeech({
-        model: BMO_SPEECH_MODEL,
+      synthesizeStream({
+        model: cfg.tts_model,
         voice: cfg.tts_voice,
         text: toSpeakableText(thoughtText),
-        instructions: BMO_SPEECH_INSTRUCTIONS,
+        systemPrompt: BMO_VOICE_DIRECTION,
+        verbatim: true,
         signal: ac.signal,
       }),
     );

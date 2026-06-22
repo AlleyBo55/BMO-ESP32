@@ -5,8 +5,8 @@ import { Buffer } from 'node:buffer';
 import { verifyFingerprint } from '@/app/api/_lib/fingerprint-guard';
 import { writeActivityLog, type ActivityLogRow } from '@/app/api/_lib/log';
 import { getConfig } from '@/lib/config';
-import { OpenRouterError, synthesizeSpeech } from '@/lib/openrouter';
-import { BMO_SPEECH_INSTRUCTIONS, BMO_SPEECH_MODEL, toSpeakableText } from '@/lib/voice';
+import { OpenRouterError, synthesizeStream } from '@/lib/openrouter';
+import { BMO_VOICE_DIRECTION, toSpeakableText } from '@/lib/voice';
 import { applyRadioFx } from '@/lib/voice-fx';
 import { buildWavHeader } from '@/lib/wav';
 
@@ -111,9 +111,10 @@ export async function POST(req: Request): Promise<Response> {
   const cfg = await getConfig();
   const voice = body.voice ?? cfg.tts_voice;
   const format = body.format ?? 'pcm16';
-  // Spoken replies use the dedicated verbatim TTS model, not cfg.tts_model
-  // (which is the chat-audio model reserved for singing). Log the real one.
-  const ttsModel = BMO_SPEECH_MODEL;
+  // Spoken replies use the configured chat-audio model (gpt-audio-mini) via
+  // the streaming chat path with a verbatim "read this script" wrapper, so the
+  // audio matches the logged reply text. Log the model actually used.
+  const ttsModel = cfg.tts_model;
   const inputText = body.text;
 
   /**
@@ -160,11 +161,12 @@ export async function POST(req: Request): Promise<Response> {
   let iterator: AsyncIterator<Buffer>;
   try {
     const it = applyRadioFx(
-      synthesizeSpeech({
-        model: BMO_SPEECH_MODEL,
+      synthesizeStream({
+        model: cfg.tts_model,
         voice,
         text: toSpeakableText(inputText),
-        instructions: BMO_SPEECH_INSTRUCTIONS,
+        systemPrompt: BMO_VOICE_DIRECTION,
+        verbatim: true,
         signal: req.signal,
       }),
     );

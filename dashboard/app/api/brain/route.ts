@@ -12,7 +12,6 @@ import { getConfig } from '@/lib/config';
 import {
   chat,
   OpenRouterError,
-  synthesizeSpeech,
   synthesizeStream,
   transcribe,
   type OpenRouterTool,
@@ -21,8 +20,7 @@ import { findSongByTitle, listSongs } from '@/lib/songs';
 import type { BmoConfig, Song } from '@/lib/types';
 import {
   BMO_SINGING_DIRECTION,
-  BMO_SPEECH_INSTRUCTIONS,
-  BMO_SPEECH_MODEL,
+  BMO_VOICE_DIRECTION,
   buildSingTool,
   extractSingLyrics,
   toSpeakableText,
@@ -695,13 +693,13 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   // ------------------- open TTS stream eagerly ------------------------------
-  // Two distinct synthesis paths:
-  //   - SPEAKING (default): the dedicated /audio/speech TTS (synthesizeSpeech)
-  //     reads the reply VERBATIM. A true TTS can't improvise, so the audio
-  //     always matches the logged reply text — this fixes "BMO says something
-  //     different than the reply box".
-  //   - SINGING: keep the chat-audio model (synthesizeStream), which is the
-  //     one that can actually perform a melody from the lyrics.
+  // Two synthesis paths, both via the chat-audio model (synthesizeStream):
+  //   - SPEAKING (default): the reply is wrapped in a verbatim "read this
+  //     script word-for-word" instruction (verbatim:true) plus the spoken
+  //     voice direction, so the model reads EXACTLY the reply text instead of
+  //     improvising a different answer — the audio matches the reply box.
+  //   - SINGING: verbatim:false with the singing direction, so the model
+  //     performs a melody from the lyrics instead of reading them flat.
   const isSinging = singLyrics !== null;
   // Rewrite "BMO" → "Bimo" in the spoken text so TTS says "BeeMo", not letters.
   // (The logged reply keeps canonical "BMO".)
@@ -719,11 +717,12 @@ export async function POST(req: Request): Promise<Response> {
           verbatim: false,
           signal: ac.signal,
         })
-      : synthesizeSpeech({
-          model: BMO_SPEECH_MODEL,
+      : synthesizeStream({
+          model: cfg.tts_model,
           voice: cfg.tts_voice,
           text: ttsText,
-          instructions: BMO_SPEECH_INSTRUCTIONS,
+          systemPrompt: BMO_VOICE_DIRECTION,
+          verbatim: true,
           signal: ac.signal,
         });
     const it = applyRadioFx(source);
