@@ -4,9 +4,9 @@ import { Buffer } from 'node:buffer';
 
 import { requireAdmin } from '@/lib/api-auth';
 import { getConfig } from '@/lib/config';
-import { OpenRouterError, synthesizeSpeech } from '@/lib/openrouter';
+import { OpenRouterError, synthesizeStream } from '@/lib/openrouter';
 import { generateThought } from '@/lib/thoughts';
-import { BMO_SPEECH_INSTRUCTIONS, BMO_SPEECH_MODEL, toSpeakableText } from '@/lib/voice';
+import { BMO_VOICE_DIRECTION, toSpeakableText } from '@/lib/voice';
 import { applyRadioFx } from '@/lib/voice-fx';
 import { wrapPcm16AsWav } from '@/lib/wav';
 
@@ -69,11 +69,12 @@ export async function POST(req: Request): Promise<Response> {
   const chunks: Buffer[] = [];
   try {
     for await (const frame of applyRadioFx(
-      synthesizeSpeech({
-        model: BMO_SPEECH_MODEL,
+      synthesizeStream({
+        model: cfg.tts_model,
         voice: cfg.tts_voice,
         text: toSpeakableText(thought.text),
-        instructions: BMO_SPEECH_INSTRUCTIONS,
+        systemPrompt: BMO_VOICE_DIRECTION,
+        verbatim: true,
         signal: req.signal,
       }),
     )) {

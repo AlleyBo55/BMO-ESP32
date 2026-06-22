@@ -4,11 +4,10 @@ import { Buffer } from 'node:buffer';
 
 import { requireAdmin } from '@/lib/api-auth';
 import { getConfig } from '@/lib/config';
-import { OpenRouterError, synthesizeSpeech, synthesizeStream } from '@/lib/openrouter';
+import { OpenRouterError, synthesizeStream } from '@/lib/openrouter';
 import {
   BMO_SINGING_DIRECTION,
-  BMO_SPEECH_INSTRUCTIONS,
-  BMO_SPEECH_MODEL,
+  BMO_VOICE_DIRECTION,
   toSpeakableText,
 } from '@/lib/voice';
 import { applyRadioFx } from '@/lib/voice-fx';
@@ -73,9 +72,10 @@ export async function POST(req: Request): Promise<Response> {
 
   const cfg = await getConfig();
   const voice = typeof parsed.voice === 'string' && parsed.voice.length > 0 ? parsed.voice : cfg.tts_voice;
-  // When `sing` is true the simulator wants BMO to actually sing the text, so
-  // we use the chat-audio model (which can perform a melody). Plain speech uses
-  // the dedicated verbatim TTS so the audio matches the text exactly.
+  // When `sing` is true the simulator wants BMO to actually sing the text
+  // (verbatim:false + singing direction so the model performs a melody). Plain
+  // speech uses verbatim:true + the spoken voice direction so the chat-audio
+  // model reads the text exactly instead of improvising a different reply.
   const sing = parsed.sing === true;
 
   // Buffer the whole synthesis so we can emit a finite, playable WAV. The
@@ -91,11 +91,12 @@ export async function POST(req: Request): Promise<Response> {
           verbatim: false,
           signal: req.signal,
         })
-      : synthesizeSpeech({
-          model: BMO_SPEECH_MODEL,
+      : synthesizeStream({
+          model: cfg.tts_model,
           voice,
           text: toSpeakableText(text),
-          instructions: BMO_SPEECH_INSTRUCTIONS,
+          systemPrompt: BMO_VOICE_DIRECTION,
+          verbatim: true,
           signal: req.signal,
         });
     for await (const frame of applyRadioFx(source)) {
