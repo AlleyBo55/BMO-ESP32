@@ -263,6 +263,39 @@ export async function recentTurns(
   }
 }
 
+/**
+ * Epoch-ms timestamp of BMO's most recent idle `'thought'` memory, or null if
+ * it has never mused (or on any failure). The idle-thought route uses this as
+ * the "when did BMO last speak up on its own" marker to gate how often it
+ * muses — the captured musings double as that state, so no extra table is
+ * needed. Always resolves; degrades to null.
+ */
+export async function lastThoughtAt(): Promise<number | null> {
+  if (isRemoteBrain()) return null;
+  try {
+    const supabase = getServiceClient();
+    const { data, error } = await supabase
+      .from('brain_memory')
+      .select('created_at')
+      .eq('kind', 'thought')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error !== null) {
+      warn('lastThoughtAt', error.message);
+      return null;
+    }
+    if (data === null || typeof data !== 'object' || !('created_at' in data)) return null;
+    const ts = (data as { created_at: unknown }).created_at;
+    if (typeof ts !== 'string') return null;
+    const ms = Date.parse(ts);
+    return Number.isFinite(ms) ? ms : null;
+  } catch (err) {
+    warn('lastThoughtAt', err);
+    return null;
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /* capture — write the exchange down                                           */
 /* -------------------------------------------------------------------------- */

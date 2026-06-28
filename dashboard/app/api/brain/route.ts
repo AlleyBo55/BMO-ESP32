@@ -239,7 +239,7 @@ function buildTools(cfg: BmoConfig, songs: Song[]): OpenRouterTool[] {
       function: {
         name: 'play_song',
         description:
-          'Play a real recorded song from the curated catalog through the BMO speaker. Use this when the user asks to play a specific real song or piece of music that exists in the catalog. Match the user request to the closest title from the enum. To instead have BMO sing a short song in its own voice, use the `sing` tool.',
+          "Play a REAL recorded song from BMO's curated catalog through the speaker. PREFER this tool whenever the child asks for a song whose title is in the enum below — even if they say \"sing\" (e.g. \"sing the BMO song\") — because a real recording exists and sounds best. Match the request to the closest enum title. Only fall back to the `sing` tool when the child wants a made-up/improvised song that is NOT in the catalog.",
         parameters: {
           type: 'object',
           additionalProperties: false,

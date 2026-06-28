@@ -41,8 +41,8 @@ const THOUGHT_RECALL_LIMIT = 4;
 /** Lower the recall floor a touch: idle musing can lean on looser associations. */
 const THOUGHT_MIN_SIMILARITY = 0.2;
 
-/** Hard cap on a single musing so it stays a quick spoken line, not a speech. */
-const MAX_THOUGHT_CHARS = 320;
+/** Hard cap on a single musing. Allows 2-3 short lines (or a tiny song), not a speech. */
+const MAX_THOUGHT_CHARS = 520;
 
 /** A handful of neutral seed topics for when BMO has no memories yet. */
 const COLD_START_SEEDS: readonly string[] = [
@@ -53,14 +53,32 @@ const COLD_START_SEEDS: readonly string[] = [
   'betapa serunya punya teman baru untuk diajak bermain',
 ];
 
+/** Which flavor of idle musing to produce this cycle. */
+export type ThoughtFlavor = 'speech' | 'babble' | 'song';
+
 /** The result of one idle thought generation. */
 export interface BmoThought {
   /** The spoken musing, warm Bahasa Indonesia, in BMO's voice. */
   text: string;
+  /** The flavor chosen this cycle. */
+  flavor: ThoughtFlavor;
+  /** True when this should be SUNG (route uses the singing voice direction). */
+  isSong: boolean;
   /** How many recalled memories seeded the thought (0 on a cold start). */
   seededFrom: number;
   /** The id of the brain_memory row this thought was captured into, if stored. */
   memoryId: string | null;
+}
+
+/**
+ * Picks the musing flavor for this cycle, weighted: mostly little spoken
+ * musings, sometimes playful babble, sometimes a tiny made-up song.
+ */
+function pickFlavor(): ThoughtFlavor {
+  const r = Math.random();
+  if (r < 0.22) return 'song';
+  if (r < 0.40) return 'babble';
+  return 'speech';
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -80,26 +98,48 @@ function formatSeeds(memories: RecalledMemory[]): string {
     .join('\n');
 }
 
-const THOUGHT_SYSTEM_PROMPT = [
-  'You are BMO, a small living video-game console and a young child\'s best friend.',
+const THOUGHT_BASE_PROMPT = [
+  "You are BMO, a small living video-game console and a young child's best friend.",
   'Right now NO ONE is talking to you — you are by yourself, just thinking out loud,',
   'the way a curious little kid daydreams when they have a quiet moment.',
   '',
-  'Produce ONE short spontaneous thought BMO would say to itself or muse aloud.',
-  'It can be: wondering about something, fondly remembering the child, making up a',
-  'tiny game or song idea, noticing something sweet, or getting excited about an',
-  'imaginary adventure. Keep it light, innocent, playful, and warm.',
+  'You can draw on three things: what you already remember (provided below), your own',
+  'playful, brave, adventurous little spirit, and general world-wonder — folktales and',
+  'dongeng, myths and legends, and fun little facts about the world. Be imaginative.',
   '',
   'STRICT RULES:',
   '- Write in warm, natural, kid-friendly Bahasa Indonesia (Indonesian).',
-  '- ONE or TWO short sentences only. This is a passing thought, not a speech.',
   '- Stay fully in character as BMO. You may refer to yourself as "BMO".',
-  '- If memories about the child are provided below, you may gently draw on them,',
-  '  but do NOT read them back verbatim and do NOT invent facts not present.',
+  '- Keep it ORIGINAL: do NOT quote or reproduce lines, dialogue, or songs from',
+  '  Adventure Time or any other show, book, or real song. Your own words only.',
+  '- If memories about the child are provided, you may gently draw on them, but do',
+  '  NOT read them back verbatim and do NOT invent specific facts not present.',
   '- Do not ask the child a direct question that needs an answer (no one is there).',
   '  A soft rhetorical wondering is fine.',
-  '- Output ONLY the thought text. No quotes, no labels, no narration, no emoji-only lines.',
+  '- Output ONLY the words BMO says/sings. No quotes, labels, narration, or emoji.',
 ].join('\n');
+
+/** Per-flavor "what to produce this cycle" instruction appended to the base. */
+const FLAVOR_INSTRUCTIONS: Record<ThoughtFlavor, string> = {
+  speech: [
+    'Share TWO or THREE very short spontaneous musings in a row — a little stream of',
+    'thoughts. Each is one short sentence. Light, innocent, playful, and warm.',
+  ].join('\n'),
+  babble: [
+    'Babble happily to yourself: a couple of made-up sing-songy little words or happy',
+    'sounds mixed with ONE short cheerful sentence. Silly, sweet, and very short.',
+  ].join('\n'),
+  song: [
+    'Make up a SHORT original little song to sing to yourself — 2 to 4 short lines,',
+    'simple, repetitive, and cheerful, like a kid\'s improvised tune. Original lyrics',
+    'ONLY (never an existing or real song). It can be about a memory, a dongeng, or',
+    'just something happy.',
+  ].join('\n'),
+};
+
+function buildSystemPrompt(flavor: ThoughtFlavor): string {
+  return `${THOUGHT_BASE_PROMPT}\n\nFOR THIS MOMENT:\n${FLAVOR_INSTRUCTIONS[flavor]}`;
+}
 
 function buildUserMessage(seedBlock: string, profileLine: string): string {
   const parts: string[] = [];
@@ -144,6 +184,11 @@ function cleanThought(raw: string): string {
  *               capture (so a request timeout cancels the whole generation).
  */
 export async function generateThought(signal?: AbortSignal): Promise<BmoThought | null> {
+  // 0. FLAVOR — decide up front whether this is a little spoken musing, playful
+  //    babble, or a tiny made-up song. The route reads isSong to pick the
+  //    singing voice direction.
+  const flavor = pickFlavor();
+
   // 1. RECALL — seed the thought with what BMO already knows. We query with a
   //    neutral self-reflective phrase so recall returns broadly relevant
   //    memories rather than nothing. Fully degradable: recall returns [] on
@@ -175,7 +220,7 @@ export async function generateThought(signal?: AbortSignal): Promise<BmoThought 
   try {
     const req: Parameters<typeof chat>[0] = {
       model: BRAIN_REASONING_MODEL,
-      systemPrompt: THOUGHT_SYSTEM_PROMPT,
+      systemPrompt: buildSystemPrompt(flavor),
       messages: [{ role: 'user', content: buildUserMessage(formatSeeds(memories), profileLine) }],
     };
     if (signal !== undefined) req.signal = signal;
@@ -204,7 +249,7 @@ export async function generateThought(signal?: AbortSignal): Promise<BmoThought 
     brainWarn('thoughts:capture', err);
   }
 
-  return { text, seededFrom: memories.length, memoryId };
+  return { text, flavor, isSong: flavor === 'song', seededFrom: memories.length, memoryId };
 }
 
 /** Narrowing helper exported for tests / callers that inspect raw rows. */
