@@ -4,10 +4,11 @@ import { Buffer } from 'node:buffer';
 
 import { verifyFingerprint } from '@/app/api/_lib/fingerprint-guard';
 import { writeActivityLog, type ActivityLogRow } from '@/app/api/_lib/log';
+import { lastThoughtAt } from '@/lib/brain';
 import { getConfig } from '@/lib/config';
 import { OpenRouterError, synthesizeStream } from '@/lib/openrouter';
 import { generateThought } from '@/lib/thoughts';
-import { BMO_VOICE_DIRECTION, toSpeakableText } from '@/lib/voice';
+import { BMO_SINGING_DIRECTION, BMO_VOICE_DIRECTION, toSpeakableText } from '@/lib/voice';
 import { applyRadioFx } from '@/lib/voice-fx';
 import { buildWavHeader } from '@/lib/wav';
 
@@ -119,8 +120,33 @@ async function handle(req: Request): Promise<Response> {
     return noContent();
   }
 
+  // ------------------- random-interval gate ---------------------------------
+  // The firmware polls ~every 60s, but BMO should only pipe up on its own every
+  // ~1-5 minutes. The timestamp of the last captured musing is the "when did
+  // BMO last speak up" marker. Under 1 min: never. 1-5 min: a probability ramp
+  // so the gap lands randomly in that window (averaging ~3 min). Past 5 min:
+  // always. A 204 here is cheap (no LLM/TTS), so frequent polling stays nearly
+  // free. (One musing already bundles 2-3 short thoughts, so this is the gap
+  // BETWEEN bursts.)
+  const lastMs = await lastThoughtAt();
+  const elapsed = lastMs === null ? Number.POSITIVE_INFINITY : Date.now() - lastMs;
+  const MIN_GAP_MS = 60_000;
+  const MAX_GAP_MS = 300_000;
+  if (elapsed < MIN_GAP_MS) {
+    cleanup();
+    return noContent();
+  }
+  if (elapsed < MAX_GAP_MS) {
+    const p = (elapsed - MIN_GAP_MS) / (MAX_GAP_MS - MIN_GAP_MS);
+    if (Math.random() >= p) {
+      cleanup();
+      return noContent();
+    }
+  }
+
   // ------------------- generate the thought (recall → muse → capture) -------
   let thoughtText: string;
+  let isSong = false;
   try {
     const thought = await generateThought(ac.signal);
     if (thought === null) {
@@ -128,6 +154,7 @@ async function handle(req: Request): Promise<Response> {
       return noContent(); // a missed idle thought is a non-event, not an error
     }
     thoughtText = thought.text;
+    isSong = thought.isSong;
   } catch {
     cleanup();
     return noContent();
@@ -141,8 +168,8 @@ async function handle(req: Request): Promise<Response> {
         model: cfg.tts_model,
         voice: cfg.tts_voice,
         text: toSpeakableText(thoughtText),
-        systemPrompt: BMO_VOICE_DIRECTION,
-        verbatim: true,
+        systemPrompt: isSong ? BMO_SINGING_DIRECTION : BMO_VOICE_DIRECTION,
+        verbatim: !isSong,
         signal: ac.signal,
       }),
     );
