@@ -53,6 +53,45 @@ const COLD_START_SEEDS: readonly string[] = [
   'betapa serunya punya teman baru untuk diajak bermain',
 ];
 
+/**
+ * A big, deliberately diverse pool of "sparks". ONE is picked at RANDOM each
+ * cycle and handed to the model so its mind wanders somewhere new every time —
+ * this (plus a high temperature) is what stops BMO musing the same few things.
+ * Topics span BMO's own world, folklore/dongeng, myth, and kid-friendly facts.
+ */
+const THOUGHT_SPARKS: readonly string[] = [
+  'a myth or legend — about the moon, the stars, a mountain, or the sea',
+  'a folktale / dongeng with a clever animal or a kind little child',
+  'a fun fact about animals — how octopuses, bees, ants, or cats live',
+  'a fun fact about space — planets, comets, the moon, shooting stars',
+  'what dreams might be made of',
+  'a tiny made-up game to play later',
+  'an imaginary adventure in a candy kingdom or a city in the clouds',
+  'colors, and how each one makes you feel',
+  'a funny little invention BMO wishes it could build',
+  'the deep ocean and the strange glowing creatures down there',
+  'rain, thunder, and rainbows — where they come from',
+  'a riddle BMO just made up',
+  "what BMO's toy or robot friends might be doing right now",
+  'a favorite food and why it is so wonderful',
+  'a warm wish for the child to have a happy day',
+  'a silly "what if" — what if shoes could talk? what if clouds were fluffy?',
+  'counting something funny, or a number that feels magical',
+  'the wind, the seasons, the smell of rain',
+  "a little tune stuck in BMO's head",
+  'bravery, and a tiny hero from a dongeng',
+  'making a wish on the first star of the night',
+  'a happy memory of playing together',
+  'a faraway place BMO daydreams about visiting',
+  'a tiny worry that turns out perfectly okay',
+  'how a good friend is the best treasure of all',
+  'a magical creature from a legend — a naga, a garuda, or a peri',
+];
+
+function randomSpark(): string {
+  return THOUGHT_SPARKS[Math.floor(Math.random() * THOUGHT_SPARKS.length)] ?? THOUGHT_SPARKS[0]!;
+}
+
 /** Which flavor of idle musing to produce this cycle. */
 export type ThoughtFlavor = 'speech' | 'babble' | 'song';
 
@@ -85,10 +124,9 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-/** Picks a stable-ish cold-start seed based on the minute, for light variety. */
+/** Picks a random cold-start seed (used only when BMO has no memories yet). */
 function coldStartSeed(): string {
-  const idx = Math.floor(Date.now() / 60_000) % COLD_START_SEEDS.length;
-  return COLD_START_SEEDS[idx] ?? COLD_START_SEEDS[0]!;
+  return COLD_START_SEEDS[Math.floor(Math.random() * COLD_START_SEEDS.length)] ?? COLD_START_SEEDS[0]!;
 }
 
 /** Formats recalled memories into a compact context block for the prompt. */
@@ -141,7 +179,7 @@ function buildSystemPrompt(flavor: ThoughtFlavor): string {
   return `${THOUGHT_BASE_PROMPT}\n\nFOR THIS MOMENT:\n${FLAVOR_INSTRUCTIONS[flavor]}`;
 }
 
-function buildUserMessage(seedBlock: string, profileLine: string): string {
+function buildUserMessage(seedBlock: string, profileLine: string, spark: string): string {
   const parts: string[] = [];
   if (seedBlock.length > 0) {
     parts.push('Some things BMO already remembers:');
@@ -154,7 +192,9 @@ function buildUserMessage(seedBlock: string, profileLine: string): string {
     parts.push(`About the child: ${profileLine}`);
   }
   parts.push('');
-  parts.push('Now share ONE short spontaneous BMO thought.');
+  parts.push(`This time, let your mind wander toward: ${spark}.`);
+  parts.push('Make it FRESH — different from anything you might have said before.');
+  parts.push('Now share your spontaneous BMO thought(s) for this moment.');
   return parts.join('\n');
 }
 
@@ -186,8 +226,10 @@ function cleanThought(raw: string): string {
 export async function generateThought(signal?: AbortSignal): Promise<BmoThought | null> {
   // 0. FLAVOR — decide up front whether this is a little spoken musing, playful
   //    babble, or a tiny made-up song. The route reads isSong to pick the
-  //    singing voice direction.
+  //    singing voice direction. Also pick a RANDOM spark so the topic wanders
+  //    somewhere new every cycle (the main fix for "BMO muses the same thing").
   const flavor = pickFlavor();
+  const spark = randomSpark();
 
   // 1. RECALL — seed the thought with what BMO already knows. We query with a
   //    neutral self-reflective phrase so recall returns broadly relevant
@@ -221,7 +263,8 @@ export async function generateThought(signal?: AbortSignal): Promise<BmoThought 
     const req: Parameters<typeof chat>[0] = {
       model: BRAIN_REASONING_MODEL,
       systemPrompt: buildSystemPrompt(flavor),
-      messages: [{ role: 'user', content: buildUserMessage(formatSeeds(memories), profileLine) }],
+      messages: [{ role: 'user', content: buildUserMessage(formatSeeds(memories), profileLine, spark) }],
+      temperature: 1.0,
     };
     if (signal !== undefined) req.signal = signal;
     const res = await chat(req);
