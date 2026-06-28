@@ -77,6 +77,12 @@ export interface ChatRequest {
    * Wired to the `web_search` skill toggle in the brain route.
    */
   webSearch?: boolean;
+  /**
+   * Sampling temperature (0..2). Higher = more varied/creative output. Left
+   * undefined for deterministic-ish answers; the idle-musing path sets it high
+   * so BMO's spontaneous thoughts don't repeat themselves.
+   */
+  temperature?: number;
   signal?: AbortSignal | undefined;
 }
 
@@ -259,6 +265,9 @@ export async function chat(req: ChatRequest): Promise<ChatResponse> {
     // citations into the context, and lets the model answer over them.
     // `max_results` kept small to bound latency/cost for a kids' toy.
     body.plugins = [{ id: 'web', max_results: 3 }];
+  }
+  if (typeof req.temperature === 'number') {
+    body.temperature = req.temperature;
   }
 
   let response: Response;
