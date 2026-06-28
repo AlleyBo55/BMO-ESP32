@@ -182,6 +182,33 @@ function mimeToFormat(mime: string | null): 'wav' | 'mp3' | 'flac' {
 }
 
 /**
+ * Repairs the length fields of a streamed WAV in place, then returns it.
+ *
+ * The firmware streams the post-wake command audio as a chunked, unknown-length
+ * body, so it can't know the size up front — it writes the 0xFFFFFFFF "unknown"
+ * sentinel into the RIFF (offset 4) and data (offset 40) size fields. The STT
+ * model can't decode that sentinel (it yields an empty transcript), so once
+ * we've buffered the whole body here we rewrite both fields from the actual
+ * received byte count.
+ *
+ * Only a canonical 44-byte RIFF/WAVE/PCM header whose declared data size is
+ * LARGER than the bytes we received (the sentinel, or any overstated size) is
+ * touched. A correctly-sized WAV — every other caller, e.g. the buffered
+ * touch/wake paths — is left exactly as-is.
+ */
+function normalizeWavLength(buf: Buffer): void {
+  if (buf.length < 44) return;
+  if (buf.toString('ascii', 0, 4) !== 'RIFF') return;
+  if (buf.toString('ascii', 8, 12) !== 'WAVE') return;
+  if (buf.toString('ascii', 36, 40) !== 'data') return;
+  const declaredData = buf.readUInt32LE(40);
+  const actualData = buf.length - 44;
+  if (declaredData <= actualData) return; // already correct — leave untouched
+  buf.writeUInt32LE((buf.length - 8) >>> 0, 4); // RIFF chunk size = total - 8
+  buf.writeUInt32LE(actualData >>> 0, 40); // data chunk size = total - 44
+}
+
+/**
  * Computes the OpenRouter `tools` array exposed to the LLM.
  *
  * Two tools may be wired:
@@ -290,6 +317,10 @@ async function resolveTranscript(
 
     const arrayBuffer = await audio.arrayBuffer();
     const buf = Buffer.from(arrayBuffer);
+    // Streamed (unknown-length) uploads arrive with a 0xFFFFFFFF WAV size
+    // sentinel; rewrite it from the bytes we actually received so STT can
+    // decode it. No-op for correctly-sized WAVs (the buffered paths).
+    normalizeWavLength(buf);
     const audioMime = audio.type.length > 0 ? audio.type : null;
     try {
       const result = await transcribe({
