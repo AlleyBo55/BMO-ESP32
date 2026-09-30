@@ -407,3 +407,16 @@ export const BRAIN_CAPABILITIES = [
     module: 'lib/thoughts.ts · /api/brain/idle-thought',
   },
 ] as const satisfies readonly BrainCapability[];
+
+/**
+ * Lines the landing's BMO "answers" with after a hold-to-talk. The web demo
+ * only acts out the voice loop's faces; nothing is recorded or sent.
+ */
+export const BMO_REPLIES = [
+  'Hi friend! I heard you. Want to build me?',
+  'I am thinking a very big thought. It is about snacks.',
+  'My heart is a memory core. I will remember this.',
+  'Beep boop! That tickled my touch pad.',
+  'Hold me again and tell me a secret.',
+  'I run on an ESP32 and a lot of love.',
+] as const;
