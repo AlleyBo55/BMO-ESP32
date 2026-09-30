@@ -10,6 +10,9 @@
  */
 
 export const LLM_MODELS = [
+  'openai/gpt-6-luna',
+  'openai/gpt-6-sol',
+  'openai/gpt-5.6-terra',
   'openai/gpt-4.1-mini',
   'openai/gpt-4o-mini',
   'anthropic/claude-haiku-4-5',
@@ -18,6 +21,7 @@ export const LLM_MODELS = [
 ] as const;
 
 export const STT_MODELS = [
+  'openai/gpt-transcribe',
   'qwen/qwen3-asr-flash-2026-02-10',
   'openai/whisper-large-v3',
 ] as const;
